@@ -16,6 +16,7 @@ func main() {
 	host := flag.String("host", "0.0.0.0", "监听主机")
 	port := flag.String("port", "8000", "监听端口")
 	dir := flag.String("dir", ".", "暴露的目录")
+	hidden := flag.Bool("hidden", false, "显示以 . 开头的隐藏文件")
 	flag.Parse()
 
 	absDir, err := filepath.Abs(*dir)
@@ -24,7 +25,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRequest(w, r, absDir)
+		handleRequest(w, r, absDir, *hidden)
 	})
 
 	addr := fmt.Sprintf("%s:%s", *host, *port)
@@ -32,7 +33,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
-func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string) {
+func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool) {
 	start := time.Now()
 	defer func() {
 		ip := getClientIP(r)
@@ -55,6 +56,16 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string) {
 	relPath := strings.TrimPrefix(path, "/")
 	fullPath := filepath.Join(baseDir, relPath)
 
+	// 隐藏文件保护：路径中任意分段以 . 开头时，未开启 -hidden 则返回 404
+	if !showHidden {
+		for _, seg := range strings.Split(relPath, "/") {
+			if strings.HasPrefix(seg, ".") {
+				http.NotFound(w, r)
+				return
+			}
+		}
+	}
+
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		http.NotFound(w, r)
@@ -62,7 +73,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string) {
 	}
 
 	if info.IsDir() {
-		serveFileList(w, baseDir, relPath)
+		serveFileList(w, baseDir, relPath, showHidden)
 		return
 	}
 
@@ -95,7 +106,7 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
-func serveFileList(w http.ResponseWriter, baseDir, relPath string) {
+func serveFileList(w http.ResponseWriter, baseDir, relPath string, showHidden bool) {
 	fullPath := filepath.Join(baseDir, relPath)
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
@@ -112,6 +123,9 @@ const dirs = [`)
 	first := true
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		info, err := entry.Info()
@@ -132,6 +146,9 @@ const files = [`)
 	first = true
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		info, err := entry.Info()
