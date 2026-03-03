@@ -52,24 +52,25 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string) {
 	}
 
 	path := filepath.Clean(r.URL.Path)
-	// 构建完整路径
 	relPath := strings.TrimPrefix(path, "/")
 	fullPath := filepath.Join(baseDir, relPath)
 
-	// 检查路径是否存在
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	// 如果是目录，显示文件列表
 	if info.IsDir() {
 		serveFileList(w, baseDir, relPath)
 		return
 	}
 
-	// 如果是文件，提供下载
+	if r.URL.Query().Get("preview") == "1" {
+		servePreview(w, r, fullPath, relPath)
+		return
+	}
+
 	serveFile(w, r, baseDir, relPath)
 }
 
@@ -105,7 +106,6 @@ func serveFileList(w http.ResponseWriter, baseDir, relPath string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, htmlTemplate)
 
-	// 生成面包屑导航
 	fmt.Fprint(w, `<script>
 const currentPath = "`+escapeJS(relPath)+`";
 const dirs = [`)
@@ -178,6 +178,31 @@ func serveFile(w http.ResponseWriter, r *http.Request, baseDir, filename string)
 	fileServer := http.FileServer(http.Dir(baseDir))
 	r.URL.Path = "/" + filename
 	fileServer.ServeHTTP(w, r)
+}
+
+func servePreview(w http.ResponseWriter, r *http.Request, fullPath, relPath string) {
+	ext := strings.ToLower(filepath.Ext(relPath))
+	switch ext {
+	case ".pdf", ".md":
+		f, err := os.Open(fullPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			http.Error(w, "文件错误", http.StatusInternalServerError)
+			return
+		}
+		if ext == ".md" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		}
+		w.Header().Set("Content-Disposition", "inline")
+		http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+	default:
+		http.Error(w, "不支持预览该文件类型", http.StatusBadRequest)
+	}
 }
 
 const htmlTemplate = `<!DOCTYPE html>
@@ -286,9 +311,11 @@ const htmlTemplate = `<!DOCTYPE html>
             margin-right: 18px;
             background: linear-gradient(135deg, #7fcdbb 0%, #41b6c4 100%);
             color: white;
+            flex-shrink: 0;
         }
         .file-info {
             flex: 1;
+            min-width: 0;
         }
         .file-name {
             font-weight: 600;
@@ -308,6 +335,42 @@ const htmlTemplate = `<!DOCTYPE html>
             padding: 6px 12px;
             background: #e6f7f5;
             border-radius: 20px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .file-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .btn-preview, .btn-download {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .btn-preview {
+            background: #ebf4ff;
+            color: #2b6cb0;
+            border: 1px solid #bee3f8;
+        }
+        .btn-preview:hover {
+            background: #2b6cb0;
+            color: white;
+        }
+        .btn-download {
+            background: #e6f7f5;
+            color: #2a9d8f;
+            border: 1px solid #b2e0da;
+        }
+        .btn-download:hover {
+            background: #2a9d8f;
+            color: white;
         }
         .breadcrumb {
             padding: 15px 30px;
@@ -392,11 +455,13 @@ const htmlTemplate = `<!DOCTYPE html>
         </div>
     </div>
     <script>
+        const PREVIEWABLE = new Set(['pdf', 'md']);
+
         function getFileIcon(filename, isDir) {
             if (isDir) return '📁';
             const ext = filename.split('.').pop().toLowerCase();
             const icons = {
-                pdf: '📄', doc: '📝', docx: '📝', txt: '📃',
+                pdf: '📄', doc: '📝', docx: '📝', txt: '📃', md: '📝',
                 jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️', webp: '🖼️',
                 mp4: '🎬', avi: '🎬', mkv: '🎬', mov: '🎬',
                 mp3: '🎵', wav: '🎵', flac: '🎵',
@@ -414,6 +479,12 @@ const htmlTemplate = `<!DOCTYPE html>
             return div.innerHTML;
         }
 
+        function buildPath(basePath, name) {
+            const parts = basePath ? basePath.split('/').filter(Boolean) : [];
+            parts.push(name);
+            return parts.map(encodeURIComponent).join('/');
+        }
+
         function buildBreadcrumb(path) {
             const container = document.getElementById('breadcrumb');
             if (!path) {
@@ -424,7 +495,7 @@ const htmlTemplate = `<!DOCTYPE html>
             let html = '<a href="/">📁 根目录</a>';
             let currentPath = '';
             for (let i = 0; i < parts.length; i++) {
-                currentPath += '/' + parts[i];
+                currentPath += '/' + encodeURIComponent(parts[i]);
                 if (i === parts.length - 1) {
                     html += ' / <span>' + escapeHtml(parts[i]) + '</span>';
                 } else {
@@ -457,11 +528,10 @@ const htmlTemplate = `<!DOCTYPE html>
 
             let html = '';
 
-            // 渲染目录
             if (displayDirs.length > 0) {
                 html += displayDirs.map(d => {
-                    const dirPath = currentPath ? currentPath + '/' + d.name : d.name;
-                    return '<a href="/' + encodeURIComponent(dirPath) + '" class="file-item" title="打开文件夹">' +
+                    const href = '/' + buildPath(currentPath, d.name);
+                    return '<a href="' + href + '" class="file-item" title="打开文件夹">' +
                         '<div class="file-icon">' + getFileIcon(d.name, true) + '</div>' +
                         '<div class="file-info">' +
                             '<div class="file-name">' + escapeHtml(d.name) + '</div>' +
@@ -472,11 +542,25 @@ const htmlTemplate = `<!DOCTYPE html>
                 }).join('');
             }
 
-            // 渲染文件
             if (displayFiles.length > 0) {
                 html += displayFiles.map(f => {
-                    const filePath = currentPath ? currentPath + '/' + f.name : f.name;
-                    return '<a href="/' + encodeURIComponent(filePath) + '" class="file-item" download title="点击下载 ' + escapeHtml(f.name) + '">' +
+                    const href = '/' + buildPath(currentPath, f.name);
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    if (PREVIEWABLE.has(ext)) {
+                        return '<div class="file-item">' +
+                            '<div class="file-icon">' + getFileIcon(f.name, false) + '</div>' +
+                            '<div class="file-info">' +
+                                '<div class="file-name">' + escapeHtml(f.name) + '</div>' +
+                                '<div class="file-meta">修改时间: ' + f.time + '</div>' +
+                            '</div>' +
+                            '<div class="file-actions">' +
+                                '<span class="file-size">' + f.size + '</span>' +
+                                '<a href="' + href + '?preview=1" target="_blank" class="btn-preview">预览</a>' +
+                                '<a href="' + href + '" download class="btn-download">下载</a>' +
+                            '</div>' +
+                        '</div>';
+                    }
+                    return '<a href="' + href + '" class="file-item" download title="点击下载 ' + escapeHtml(f.name) + '">' +
                         '<div class="file-icon">' + getFileIcon(f.name, false) + '</div>' +
                         '<div class="file-info">' +
                             '<div class="file-name">' + escapeHtml(f.name) + '</div>' +
@@ -492,9 +576,10 @@ const htmlTemplate = `<!DOCTYPE html>
             countEl.textContent = total + ' 个项目 (' + displayDirs.length + ' 个文件夹, ' + displayFiles.length + ' 个文件)';
         }
 
-        // 搜索功能
         document.getElementById('searchInput').addEventListener('input', function(e) {
             renderFiles(allDirs, allFiles);
         });
     </script>
 `
+
+
