@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/loveuer/ursa"
+	"github.com/spf13/cobra"
 
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/api"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/model"
@@ -15,18 +18,48 @@ import (
 )
 
 func main() {
-	// 加载配置
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
 	cfg := config.Load()
+
+	cmd := &cobra.Command{
+		Use:   "ufshare",
+		Short: "UFShare - Artifact Repository Manager",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(cfg)
+		},
+	}
+
+	cmd.Flags().StringVar(&cfg.Address, "address", cfg.Address, "监听地址 (e.g. 0.0.0.0:8000)")
+	cmd.Flags().StringVar(&cfg.Data, "data", cfg.Data, "数据目录，存放文件和数据库")
+
+	return cmd
+}
+
+func run(cfg *config.Config) error {
+	// 确保数据目录存在
+	if err := os.MkdirAll(cfg.Data, 0755); err != nil {
+		return fmt.Errorf("failed to create data dir: %w", err)
+	}
+
+	// SQLite 默认放在 data 目录下
+	if cfg.Database.DSN == "" {
+		cfg.Database.DSN = filepath.Join(cfg.Data, "ufshare.db")
+	}
 
 	// 连接数据库
 	db, err := database.Connect(cfg.Database.Driver, cfg.Database.DSN)
 	if err != nil {
-		log.Fatalf("Failed to connect database: %v", err)
+		return fmt.Errorf("failed to connect database: %w", err)
 	}
 
 	// 自动迁移
 	if err := model.AutoMigrate(db); err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
+		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
 	// 初始化服务
@@ -46,24 +79,22 @@ func main() {
 	router := api.NewRouter(authService, userService, permService, web.FS())
 	router.Setup(app)
 
-	// 启动服务
-	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Starting server on %s", addr)
-	if err := app.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
+	log.Printf("data dir : %s", cfg.Data)
+	log.Printf("database : %s", cfg.Database.DSN)
+	log.Printf("listening: %s", cfg.Address)
+
+	return app.Run(cfg.Address)
 }
 
 func createDefaultAdmin(authService *service.AuthService, userService *service.UserService) error {
 	user, err := authService.Register("admin", "admin123", "admin@ufshare.local")
 	if err != nil {
 		if err == service.ErrUserExists {
-			return nil // 已存在，忽略
+			return nil
 		}
 		return err
 	}
 
-	// 设置为管理员
 	if err := userService.SetAdmin(user.ID, true); err != nil {
 		return err
 	}

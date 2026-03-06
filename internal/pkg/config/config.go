@@ -6,14 +6,10 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
+	Address  string        // 监听地址，如 0.0.0.0:8000
+	Data     string        // 数据目录，存放上传文件和数据库
 	Database DatabaseConfig
 	JWT      JWTConfig
-}
-
-type ServerConfig struct {
-	Host string
-	Port string
 }
 
 type DatabaseConfig struct {
@@ -28,13 +24,11 @@ type JWTConfig struct {
 
 func Load() *Config {
 	return &Config{
-		Server: ServerConfig{
-			Host: getEnv("SERVER_HOST", "0.0.0.0"),
-			Port: getEnv("SERVER_PORT", "8000"),
-		},
+		Address: getEnv("UFSHARE_ADDRESS", "0.0.0.0:8000"),
+		Data:    getEnv("UFSHARE_DATA", "."),
 		Database: DatabaseConfig{
 			Driver: getEnv("DB_DRIVER", "sqlite"),
-			DSN:    getEnv("DB_DSN", "ufshare.db"),
+			DSN:    getEnv("DB_DSN", ""),
 		},
 		JWT: JWTConfig{
 			Secret: getEnv("JWT_SECRET", "ufshare-secret-key-change-in-production"),
