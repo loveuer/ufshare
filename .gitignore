@@ -2,3 +2,6 @@
 ufshare
 web/node_modules/
 web/dist/
+x-*
+.qoder
+.vscode

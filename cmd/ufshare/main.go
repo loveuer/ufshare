@@ -66,6 +66,7 @@ func run(cfg *config.Config) error {
 	authService := service.NewAuthService(db, cfg.JWT.Secret, cfg.JWT.Expire)
 	userService := service.NewUserService(db)
 	permService := service.NewPermissionService(db)
+	fileService := service.NewFileService(db, cfg.Data)
 
 	// 创建默认管理员用户
 	if err := createDefaultAdmin(authService, userService); err != nil {
@@ -76,7 +77,7 @@ func run(cfg *config.Config) error {
 	app := ursa.New()
 
 	// 设置路由
-	router := api.NewRouter(authService, userService, permService, web.FS())
+	router := api.NewRouter(authService, userService, permService, fileService, web.FS())
 	router.Setup(app)
 
 	log.Printf("data dir : %s", cfg.Data)

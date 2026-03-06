@@ -10,5 +10,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&User{},
 		&Module{},
 		&Permission{},
+		&FileEntry{},
 	)
 }

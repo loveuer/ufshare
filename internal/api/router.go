@@ -16,14 +16,16 @@ type Router struct {
 	authService *service.AuthService
 	userService *service.UserService
 	permService *service.PermissionService
+	fileService *service.FileService
 	webFS       fs.FS
 }
 
-func NewRouter(authService *service.AuthService, userService *service.UserService, permService *service.PermissionService, webFS fs.FS) *Router {
+func NewRouter(authService *service.AuthService, userService *service.UserService, permService *service.PermissionService, fileService *service.FileService, webFS fs.FS) *Router {
 	return &Router{
 		authService: authService,
 		userService: userService,
 		permService: permService,
+		fileService: fileService,
 		webFS:       webFS,
 	}
 }
@@ -34,6 +36,7 @@ func (r *Router) Setup(app *ursa.App) {
 	userHandler := handler.NewUserHandler(r.userService)
 	moduleHandler := handler.NewModuleHandler(r.permService)
 	permHandler := handler.NewPermissionHandler(r.permService)
+	fileHandler := handler.NewFileHandler(r.fileService, r.permService)
 
 	// 公开路由
 	api := app.Group("/api/v1")
@@ -67,6 +70,13 @@ func (r *Router) Setup(app *ursa.App) {
 	admin.Post("/permissions/grant", permHandler.Grant)
 	admin.Post("/permissions/revoke", permHandler.Revoke)
 	admin.Get("/permissions/user/:user_id", permHandler.GetUserPermissions)
+
+	// 文件模块（可选认证：公有模块无需 token，私有模块需要）
+	files := api.Group("/files", middleware.OptionalAuth(r.authService))
+	files.Get("/:module", fileHandler.List)
+	files.Get("/:module/*path", fileHandler.Download)
+	files.Put("/:module/*path", fileHandler.Upload)
+	files.Delete("/:module/*path", fileHandler.Delete)
 
 	// 前端静态文件 + SPA fallback (通过 NoRoute 避免与 /api 路由冲突)
 	if r.webFS != nil {

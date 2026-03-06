@@ -6,12 +6,14 @@ import {
 } from '@mui/material'
 import PeopleIcon from '@mui/icons-material/People'
 import ExtensionIcon from '@mui/icons-material/Extension'
+import FolderIcon from '@mui/icons-material/Folder'
 import LogoutIcon from '@mui/icons-material/Logout'
 import { useAuth } from '../store/auth'
 
 const DRAWER_WIDTH = 200
 
 const navItems = [
+  { label: 'Files', path: '/files', icon: <FolderIcon /> },
   { label: 'Users', path: '/users', icon: <PeopleIcon /> },
   { label: 'Modules', path: '/modules', icon: <ExtensionIcon /> },
 ]

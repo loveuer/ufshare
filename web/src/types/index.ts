@@ -28,6 +28,19 @@ export interface Permission {
   module?: Module
 }
 
+export interface FileEntry {
+  id: number
+  created_at: string
+  updated_at: string
+  module_id: number
+  path: string
+  size: number
+  mime_type: string
+  sha256: string
+  uploader_id: number
+  uploader: string
+}
+
 export interface LoginResponse {
   code: number
   message: string
