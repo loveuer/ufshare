@@ -1,6 +1,10 @@
 package api
 
 import (
+	"io/fs"
+	"net/http"
+	"strings"
+
 	"github.com/loveuer/ursa"
 
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/api/handler"
@@ -12,13 +16,15 @@ type Router struct {
 	authService *service.AuthService
 	userService *service.UserService
 	permService *service.PermissionService
+	webFS       fs.FS
 }
 
-func NewRouter(authService *service.AuthService, userService *service.UserService, permService *service.PermissionService) *Router {
+func NewRouter(authService *service.AuthService, userService *service.UserService, permService *service.PermissionService, webFS fs.FS) *Router {
 	return &Router{
 		authService: authService,
 		userService: userService,
 		permService: permService,
+		webFS:       webFS,
 	}
 }
 
@@ -61,4 +67,21 @@ func (r *Router) Setup(app *ursa.App) {
 	admin.Post("/permissions/grant", permHandler.Grant)
 	admin.Post("/permissions/revoke", permHandler.Revoke)
 	admin.Get("/permissions/user/:user_id", permHandler.GetUserPermissions)
+
+	// 前端静态文件 + SPA fallback (通过 NoRoute 避免与 /api 路由冲突)
+	if r.webFS != nil {
+		fileServer := http.FileServer(http.FS(r.webFS))
+		app.NoRoute(func(c *ursa.Ctx) error {
+			path := c.Request.URL.Path
+			// assets 及静态资源直接走 fileServer
+			if strings.HasPrefix(path, "/assets/") || path == "/favicon.ico" {
+				fileServer.ServeHTTP(c.Writer, c.Request)
+				return nil
+			}
+			// SPA fallback：其余路径均返回 index.html
+			c.Request.URL.Path = "/"
+			fileServer.ServeHTTP(c.Writer, c.Request)
+			return nil
+		})
+	}
 }

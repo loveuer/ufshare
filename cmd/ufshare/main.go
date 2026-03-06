@@ -11,6 +11,7 @@ import (
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/pkg/config"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/pkg/database"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
+	"gitea.loveuer.com/loveuer/ufshare/v2/web"
 )
 
 func main() {
@@ -42,7 +43,7 @@ func main() {
 	app := ursa.New()
 
 	// 设置路由
-	router := api.NewRouter(authService, userService, permService)
+	router := api.NewRouter(authService, userService, permService, web.FS())
 	router.Setup(app)
 
 	// 启动服务

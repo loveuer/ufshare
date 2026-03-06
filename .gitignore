@@ -1,0 +1,4 @@
+*.db
+ufshare
+web/node_modules/
+web/dist/
