@@ -13,16 +13,13 @@ type FileEntry struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
-	ModuleID uint   `json:"module_id" gorm:"index;not null"`
-	Path     string `json:"path" gorm:"size:1024;not null"` // 相对于模块目录的路径，如 v1.0/app.tar.gz
-	Size     int64  `json:"size" gorm:"not null"`
+	Path     string `json:"path" gorm:"uniqueIndex;size:1024;not null"` // 文件相对路径，如 v1.0/app.tar.gz
+	Size     int64  `json:"size"`
 	MimeType string `json:"mime_type" gorm:"size:128"`
 	SHA256   string `json:"sha256" gorm:"size:64"`
 
-	UploaderID uint   `json:"uploader_id" gorm:"index"`
-	Uploader   string `json:"uploader" gorm:"size:64"` // 冗余存用户名，方便展示
-
-	Module Module `json:"-" gorm:"foreignKey:ModuleID"`
+	UploaderID uint   `json:"uploader_id"`
+	Uploader   string `json:"uploader" gorm:"size:64"`
 }
 
 func (FileEntry) TableName() string {

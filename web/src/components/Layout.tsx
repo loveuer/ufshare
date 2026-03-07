@@ -5,17 +5,17 @@ import {
   Toolbar, Typography, IconButton, Tooltip,
 } from '@mui/material'
 import PeopleIcon from '@mui/icons-material/People'
-import ExtensionIcon from '@mui/icons-material/Extension'
 import FolderIcon from '@mui/icons-material/Folder'
 import LogoutIcon from '@mui/icons-material/Logout'
+import ViewModuleIcon from '@mui/icons-material/ViewModule'
 import { useAuth } from '../store/auth'
 
 const DRAWER_WIDTH = 200
 
 const navItems = [
-  { label: 'Files', path: '/files', icon: <FolderIcon /> },
+  { label: 'File Store', path: '/files', icon: <FolderIcon /> },
+  { label: 'npm', path: '/npm', icon: <ViewModuleIcon /> },
   { label: 'Users', path: '/users', icon: <PeopleIcon /> },
-  { label: 'Modules', path: '/modules', icon: <ExtensionIcon /> },
 ]
 
 export default function Layout({ children }: { children: ReactNode }) {

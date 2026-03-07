@@ -1,12 +1,10 @@
 import http from './http'
-import type { ApiResponse, LoginResponse, PageData, User, Module, Permission } from '../types'
+import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion } from '../types'
 
 // 认证
 export const authApi = {
   login: (username: string, password: string) =>
     http.post<LoginResponse>('/auth/login', { username, password }),
-  register: (username: string, password: string, email: string) =>
-    http.post<ApiResponse<User>>('/auth/register', { username, password, email }),
   me: () => http.get<ApiResponse<User>>('/auth/me'),
 }
 
@@ -20,23 +18,16 @@ export const userApi = {
   delete: (id: number) => http.delete<ApiResponse<null>>(`/admin/users/${id}`),
 }
 
-// 模块管理
-export const moduleApi = {
-  list: () => http.get<ApiResponse<Module[]>>('/admin/modules'),
-  get: (id: number) => http.get<ApiResponse<Module>>(`/admin/modules/${id}`),
-  create: (data: Partial<Module>) =>
-    http.post<ApiResponse<Module>>('/admin/modules', data),
-  update: (id: number, data: Partial<Module>) =>
-    http.put<ApiResponse<null>>(`/admin/modules/${id}`, data),
-  delete: (id: number) => http.delete<ApiResponse<null>>(`/admin/modules/${id}`),
-}
-
-// 权限管理
-export const permissionApi = {
-  getUserPermissions: (userId: number) =>
-    http.get<ApiResponse<Permission[]>>(`/admin/permissions/user/${userId}`),
-  grant: (user_id: number, module_id: number, can_read: boolean, can_write: boolean) =>
-    http.post<ApiResponse<null>>('/admin/permissions/grant', { user_id, module_id, can_read, can_write }),
-  revoke: (user_id: number, module_id: number) =>
-    http.post<ApiResponse<null>>('/admin/permissions/revoke', { user_id, module_id }),
+// npm 仓库
+export const npmApi = {
+  listPackages: () =>
+    http.get<ApiResponse<NpmPackage[]>>('/npm/packages'),
+  listVersions: (name: string) => {
+    // scoped 包 @scope/name 拆分传参
+    if (name.startsWith('@')) {
+      const [scope, pkg] = name.slice(1).split('/')
+      return http.get<ApiResponse<NpmVersion[]>>(`/npm/packages/${pkg}`, { params: { scope } })
+    }
+    return http.get<ApiResponse<NpmVersion[]>>(`/npm/packages/${name}`)
+  },
 }

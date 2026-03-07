@@ -122,6 +122,27 @@ func (s *AuthService) GetUserByID(id uint) (*model.User, error) {
 	return &user, nil
 }
 
+// VerifyCredentials 校验用户名密码，成功返回用户对象（不生成 token）
+func (s *AuthService) VerifyCredentials(username, password string) (*model.User, error) {
+	var user model.User
+	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	if user.Status == 0 {
+		return nil, ErrUserDisabled
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	return &user, nil
+}
+
 func (s *AuthService) generateToken(user *model.User) (string, error) {
 	claims := &Claims{
 		UserID:   user.ID,

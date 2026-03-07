@@ -16,39 +16,34 @@ import (
 )
 
 var (
-	ErrFileNotFound   = errors.New("file not found")
-	ErrInvalidPath    = errors.New("invalid file path")
+	ErrFileNotFound = errors.New("file not found")
+	ErrInvalidPath  = errors.New("invalid file path")
 )
 
 type FileService struct {
 	db      *gorm.DB
-	dataDir string // {data}/files
+	dataDir string // {data}/file-store
 }
 
 func NewFileService(db *gorm.DB, dataDir string) *FileService {
 	return &FileService{
 		db:      db,
-		dataDir: filepath.Join(dataDir, "files"),
+		dataDir: filepath.Join(dataDir, "file-store"),
 	}
 }
 
-// Upload 上传文件
-// moduleName: 模块名称
-// filePath:   文件在模块内的相对路径，如 v1.0/app.tar.gz
-// src:        文件内容
-func (s *FileService) Upload(moduleID uint, moduleName, filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
+// Upload 上传文件，filePath 为相对路径如 v1.0/app.tar.gz
+func (s *FileService) Upload(filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return nil, err
 	}
 
-	// 磁盘路径: {dataDir}/{moduleName}/{filePath}
-	diskPath := filepath.Join(s.dataDir, moduleName, filePath)
+	diskPath := filepath.Join(s.dataDir, filePath)
 	if err := os.MkdirAll(filepath.Dir(diskPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// 先写入临时文件，计算 sha256 和 size
 	tmpPath := diskPath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -74,14 +69,12 @@ func (s *FileService) Upload(moduleID uint, moduleName, filePath string, src io.
 		mimeType = "application/octet-stream"
 	}
 
-	// upsert 元数据
 	var entry model.FileEntry
-	err = s.db.Where("module_id = ? AND path = ?", moduleID, filePath).First(&entry).Error
+	err = s.db.Where("path = ?", filePath).First(&entry).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	entry.ModuleID = moduleID
 	entry.Path = filePath
 	entry.Size = size
 	entry.SHA256 = sha256sum
@@ -101,22 +94,22 @@ func (s *FileService) Upload(moduleID uint, moduleName, filePath string, src io.
 	return &entry, nil
 }
 
-// Download 下载文件，返回磁盘路径和元数据
-func (s *FileService) Download(moduleID uint, moduleName, filePath string) (*model.FileEntry, string, error) {
+// Download 返回元数据和磁盘路径
+func (s *FileService) Download(filePath string) (*model.FileEntry, string, error) {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return nil, "", err
 	}
 
 	var entry model.FileEntry
-	if err := s.db.Where("module_id = ? AND path = ?", moduleID, filePath).First(&entry).Error; err != nil {
+	if err := s.db.Where("path = ?", filePath).First(&entry).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, "", ErrFileNotFound
 		}
 		return nil, "", err
 	}
 
-	diskPath := filepath.Join(s.dataDir, moduleName, filePath)
+	diskPath := filepath.Join(s.dataDir, filePath)
 	if _, err := os.Stat(diskPath); err != nil {
 		return nil, "", ErrFileNotFound
 	}
@@ -125,29 +118,27 @@ func (s *FileService) Download(moduleID uint, moduleName, filePath string) (*mod
 }
 
 // Delete 删除文件
-func (s *FileService) Delete(moduleID uint, moduleName, filePath string) error {
+func (s *FileService) Delete(filePath string) error {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return err
 	}
 
 	var entry model.FileEntry
-	if err := s.db.Where("module_id = ? AND path = ?", moduleID, filePath).First(&entry).Error; err != nil {
+	if err := s.db.Where("path = ?", filePath).First(&entry).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrFileNotFound
 		}
 		return err
 	}
 
-	diskPath := filepath.Join(s.dataDir, moduleName, filePath)
-	_ = os.Remove(diskPath)
-
+	_ = os.Remove(filepath.Join(s.dataDir, filePath))
 	return s.db.Delete(&entry).Error
 }
 
-// List 列出模块下的文件
-func (s *FileService) List(moduleID uint, prefix string) ([]model.FileEntry, error) {
-	query := s.db.Where("module_id = ?", moduleID)
+// List 列出文件，可按前缀过滤
+func (s *FileService) List(prefix string) ([]model.FileEntry, error) {
+	query := s.db.Model(&model.FileEntry{})
 	if prefix != "" {
 		query = query.Where("path LIKE ?", prefix+"%")
 	}
@@ -156,16 +147,13 @@ func (s *FileService) List(moduleID uint, prefix string) ([]model.FileEntry, err
 	if err := query.Order("path").Find(&entries).Error; err != nil {
 		return nil, err
 	}
-
 	return entries, nil
 }
 
-// validatePath 防止路径穿越攻击，同时去除前导斜杠（ursa *path 参数会携带）
 func validatePath(p string) error {
 	if p == "" {
 		return ErrInvalidPath
 	}
-	p = strings.TrimPrefix(p, "/")
 	cleaned := filepath.Clean(p)
 	if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
 		return ErrInvalidPath
@@ -173,7 +161,6 @@ func validatePath(p string) error {
 	return nil
 }
 
-// normalizePath 返回去除前导斜杠后的路径
 func normalizePath(p string) string {
 	return strings.TrimPrefix(p, "/")
 }

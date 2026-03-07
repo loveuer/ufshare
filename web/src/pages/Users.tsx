@@ -6,10 +6,8 @@ import {
 import { DataGrid, type GridColDef } from '@mui/x-data-grid'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
-import SecurityIcon from '@mui/icons-material/Security'
 import type { User } from '../types'
 import { userApi } from '../api'
-import PermissionDialog from '../components/PermissionDialog'
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([])
@@ -17,7 +15,6 @@ export default function UsersPage() {
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
-  const [permUser, setPermUser] = useState<User | null>(null)
   const [editData, setEditData] = useState({ email: '', is_admin: false, status: 1 })
 
   const load = async () => {
@@ -68,12 +65,9 @@ export default function UsersPage() {
       ),
     },
     {
-      field: 'actions', headerName: 'Actions', width: 130, sortable: false,
+      field: 'actions', headerName: 'Actions', width: 100, sortable: false,
       renderCell: ({ row }) => (
         <Box>
-          <Tooltip title="Permissions">
-            <IconButton size="small" onClick={() => setPermUser(row)}><SecurityIcon fontSize="small" /></IconButton>
-          </Tooltip>
           <Tooltip title="Edit">
             <IconButton size="small" onClick={() => handleEdit(row)}><EditIcon fontSize="small" /></IconButton>
           </Tooltip>
@@ -126,11 +120,6 @@ export default function UsersPage() {
           <Button variant="contained" onClick={handleSave}>Save</Button>
         </DialogActions>
       </Dialog>
-
-      {/* 权限对话框 */}
-      {permUser && (
-        <PermissionDialog user={permUser} onClose={() => setPermUser(null)} />
-      )}
     </Box>
   )
 }

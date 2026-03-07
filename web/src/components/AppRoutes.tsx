@@ -3,8 +3,8 @@ import { useAuth } from '../store/auth'
 import Layout from '../components/Layout'
 import LoginPage from '../pages/Login'
 import UsersPage from '../pages/Users'
-import ModulesPage from '../pages/Modules'
 import FilesPage from '../pages/Files'
+import NpmPage from '../pages/Npm'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -23,8 +23,8 @@ export default function AppRoutes() {
               <Routes>
                 <Route index element={<Navigate to="/files" replace />} />
                 <Route path="files" element={<FilesPage />} />
+                <Route path="npm" element={<NpmPage />} />
                 <Route path="users" element={<UsersPage />} />
-                <Route path="modules" element={<ModulesPage />} />
               </Routes>
             </Layout>
           </RequireAuth>
