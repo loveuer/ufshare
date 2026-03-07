@@ -13,6 +13,8 @@ export const userApi = {
   list: (page = 1, page_size = 20) =>
     http.get<ApiResponse<PageData<User>>>('/admin/users', { params: { page, page_size } }),
   get: (id: number) => http.get<ApiResponse<User>>(`/admin/users/${id}`),
+  create: (data: { username: string; password: string; email?: string; is_admin?: boolean }) =>
+    http.post<ApiResponse<User>>('/admin/users', data),
   update: (id: number, data: Partial<User> & { password?: string }) =>
     http.put<ApiResponse<null>>(`/admin/users/${id}`, data),
   delete: (id: number) => http.delete<ApiResponse<null>>(`/admin/users/${id}`),

@@ -75,10 +75,15 @@ func run(cfg *config.Config) error {
 	}
 
 	// 创建 Ursa 应用
-	app := ursa.New()
+	router := api.NewRouter(authService, userService, fileService, npmService, web.FS())
+
+	appConfig := ursa.Config{}
+	if spaHandler := router.SPAHandler(); spaHandler != nil {
+		appConfig.NotFoundHandler = spaHandler
+	}
+	app := ursa.New(appConfig)
 
 	// 设置路由
-	router := api.NewRouter(authService, userService, fileService, npmService, web.FS())
 	router.Setup(app)
 
 	log.Printf("data dir : %s", cfg.Data)

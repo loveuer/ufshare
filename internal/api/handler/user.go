@@ -16,6 +16,45 @@ func NewUserHandler(userService *service.UserService) *UserHandler {
 	return &UserHandler{userService: userService}
 }
 
+type CreateUserRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Email    string `json:"email"`
+	IsAdmin  bool   `json:"is_admin"`
+}
+
+// Create 创建用户
+func (h *UserHandler) Create(c *ursa.Ctx) error {
+	var req CreateUserRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(ursa.Map{
+			"code":    400,
+			"message": "invalid request body",
+		})
+	}
+
+	if req.Username == "" || req.Password == "" {
+		return c.Status(400).JSON(ursa.Map{
+			"code":    400,
+			"message": "username and password are required",
+		})
+	}
+
+	user, err := h.userService.CreateUser(req.Username, req.Password, req.Email, req.IsAdmin)
+	if err != nil {
+		return c.Status(500).JSON(ursa.Map{
+			"code":    500,
+			"message": "failed to create user: " + err.Error(),
+		})
+	}
+
+	return c.Status(201).JSON(ursa.Map{
+		"code":    0,
+		"message": "success",
+		"data":    user,
+	})
+}
+
 // List 列出所有用户
 func (h *UserHandler) List(c *ursa.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))

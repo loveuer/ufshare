@@ -37,6 +37,24 @@ func NewRouter(
 	}
 }
 
+// SPAHandler 返回用于 ursa.Config.NotFoundHandler 的 SPA fallback 处理器
+func (r *Router) SPAHandler() ursa.HandlerFunc {
+	if r.webFS == nil {
+		return nil
+	}
+	fileServer := http.FileServer(http.FS(r.webFS))
+	return func(c *ursa.Ctx) error {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/assets/") || path == "/favicon.ico" {
+			fileServer.ServeHTTP(c.Writer, c.Request)
+			return nil
+		}
+		c.Request.URL.Path = "/"
+		fileServer.ServeHTTP(c.Writer, c.Request)
+		return nil
+	}
+}
+
 func (r *Router) Setup(app *ursa.App) {
 	authHandler := handler.NewAuthHandler(r.authService)
 	userHandler := handler.NewUserHandler(r.userService)
@@ -54,6 +72,7 @@ func (r *Router) Setup(app *ursa.App) {
 
 	admin := api.Group("/admin", middleware.Auth(r.authService), middleware.AdminOnly())
 	admin.Get("/users", userHandler.List)
+	admin.Post("/users", userHandler.Create)
 	admin.Get("/users/:id", userHandler.Get)
 	admin.Put("/users/:id", userHandler.Update)
 	admin.Delete("/users/:id", userHandler.Delete)
@@ -104,18 +123,5 @@ func (r *Router) Setup(app *ursa.App) {
 	app.Get("/npm/@:scope/:name", npmHandler.GetPackument)
 	app.Put("/npm/@:scope/:name", middleware.Auth(r.authService), npmHandler.Publish)
 
-	// ── 前端静态文件 + SPA fallback ───────────────────────────────────────────
-	if r.webFS != nil {
-		fileServer := http.FileServer(http.FS(r.webFS))
-		app.NoRoute(func(c *ursa.Ctx) error {
-			path := c.Request.URL.Path
-			if strings.HasPrefix(path, "/assets/") || path == "/favicon.ico" {
-				fileServer.ServeHTTP(c.Writer, c.Request)
-				return nil
-			}
-			c.Request.URL.Path = "/"
-			fileServer.ServeHTTP(c.Writer, c.Request)
-			return nil
-		})
-	}
+	// ── 前端静态文件 + SPA fallback（由 ursa.Config.NotFoundHandler 处理）──────
 }

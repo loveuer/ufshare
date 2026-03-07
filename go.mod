@@ -40,4 +40,3 @@ require (
 	modernc.org/sqlite v1.28.0 // indirect
 )
 
-replace github.com/loveuer/ursa => /root/codes/project/self/ursa

@@ -4,6 +4,7 @@ import {
   FormControlLabel, IconButton, Switch, TextField, Tooltip, Typography,
 } from '@mui/material'
 import { DataGrid, type GridColDef } from '@mui/x-data-grid'
+import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import type { User } from '../types'
@@ -14,8 +15,15 @@ export default function UsersPage() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
+
+  // 编辑
   const [editUser, setEditUser] = useState<User | null>(null)
   const [editData, setEditData] = useState({ email: '', is_admin: false, status: 1 })
+
+  // 新建
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createData, setCreateData] = useState({ username: '', password: '', email: '', is_admin: false })
+  const [createError, setCreateError] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -46,6 +54,23 @@ export default function UsersPage() {
     if (!confirm('Delete this user?')) return
     await userApi.delete(id)
     load()
+  }
+
+  const handleCreate = async () => {
+    setCreateError('')
+    if (!createData.username || !createData.password) {
+      setCreateError('Username and password are required')
+      return
+    }
+    try {
+      await userApi.create(createData)
+      setCreateOpen(false)
+      setCreateData({ username: '', password: '', email: '', is_admin: false })
+      load()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+      setCreateError(msg || 'Failed to create user')
+    }
   }
 
   const columns: GridColDef[] = [
@@ -81,7 +106,12 @@ export default function UsersPage() {
 
   return (
     <Box>
-      <Typography variant="h6" mb={2}>Users</Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h6">Users</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
+          New User
+        </Button>
+      </Box>
       <DataGrid
         rows={users}
         columns={columns}
@@ -94,6 +124,42 @@ export default function UsersPage() {
         autoHeight
         disableRowSelectionOnClick
       />
+
+      {/* 新建对话框 */}
+      <Dialog open={createOpen} onClose={() => { setCreateOpen(false); setCreateError('') }} maxWidth="xs" fullWidth>
+        <DialogTitle>New User</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} pt={1}>
+            {createError && (
+              <Typography color="error" variant="body2">{createError}</Typography>
+            )}
+            <TextField
+              label="Username *"
+              value={createData.username}
+              onChange={(e) => setCreateData({ ...createData, username: e.target.value })}
+            />
+            <TextField
+              label="Password *"
+              type="password"
+              value={createData.password}
+              onChange={(e) => setCreateData({ ...createData, password: e.target.value })}
+            />
+            <TextField
+              label="Email"
+              value={createData.email}
+              onChange={(e) => setCreateData({ ...createData, email: e.target.value })}
+            />
+            <FormControlLabel
+              control={<Switch checked={createData.is_admin} onChange={(e) => setCreateData({ ...createData, is_admin: e.target.checked })} />}
+              label="Admin"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCreateOpen(false); setCreateError('') }}>Cancel</Button>
+          <Button variant="contained" onClick={handleCreate}>Create</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 编辑对话框 */}
       <Dialog open={!!editUser} onClose={() => setEditUser(null)} maxWidth="xs" fullWidth>
@@ -123,3 +189,4 @@ export default function UsersPage() {
     </Box>
   )
 }
+
