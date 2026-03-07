@@ -63,6 +63,28 @@ func (s *UserService) DeleteUser(id uint) error {
 	return s.db.Delete(&model.User{}, id).Error
 }
 
+// CreateUser 创建用户
+func (s *UserService) CreateUser(username, password, email string, isAdmin bool) (*model.User, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
+	user := &model.User{
+		Username: username,
+		Password: string(hashedPassword),
+		Email:    email,
+		IsAdmin:  isAdmin,
+		Status:   1,
+	}
+
+	if err := s.db.Create(user).Error; err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
 // SetAdmin 设置管理员状态
 func (s *UserService) SetAdmin(id uint, isAdmin bool) error {
 	return s.db.Model(&model.User{}).Where("id = ?", id).Update("is_admin", isAdmin).Error
