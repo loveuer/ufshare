@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -40,6 +41,13 @@ func Load() *Config {
 			Secret: getEnv("JWT_SECRET", ""),
 			Expire: 24 * time.Hour,
 		},
+	}
+}
+
+// Finalize 在命令行 flag 解析完成后调用，补全运行时依赖 Data 才能确定的默认值
+func (c *Config) Finalize() {
+	if c.Database.Driver == "sqlite" && c.Database.DSN == "" {
+		c.Database.DSN = filepath.Join(c.Data, "ufshare.db")
 	}
 }
 

@@ -205,10 +205,14 @@ func (s *Service) buildPackumentFromDB(name, baseURL string, abbreviated bool) (
 
 // upsertPackage 创建或更新 NpmPackage 记录，返回最新的 pkg
 func (s *Service) upsertPackage(name, description, readme string, distTags map[string]string) (model.NpmPackage, error) {
+	return s.upsertPackageWith(s.db, name, description, readme, distTags)
+}
+
+func (s *Service) upsertPackageWith(db *gorm.DB, name, description, readme string, distTags map[string]string) (model.NpmPackage, error) {
 	distTagsJSON, _ := json.Marshal(distTags)
 
 	var pkg model.NpmPackage
-	err := s.db.Where("name = ?", name).First(&pkg).Error
+	err := db.Where("name = ?", name).First(&pkg).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		pkg = model.NpmPackage{
@@ -217,7 +221,7 @@ func (s *Service) upsertPackage(name, description, readme string, distTags map[s
 			Readme:      readme,
 			DistTags:    string(distTagsJSON),
 		}
-		return pkg, s.db.Create(&pkg).Error
+		return pkg, db.Create(&pkg).Error
 	}
 	if err != nil {
 		return pkg, err
@@ -230,7 +234,7 @@ func (s *Service) upsertPackage(name, description, readme string, distTags map[s
 	if readme != "" {
 		updates["readme"] = readme
 	}
-	return pkg, s.db.Model(&pkg).Updates(updates).Error
+	return pkg, db.Model(&pkg).Updates(updates).Error
 }
 
 // ensureDir 确保目录存在

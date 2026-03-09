@@ -35,19 +35,9 @@ func NewSettingService(db *gorm.DB) *SettingService {
 
 // OnChange 注册当 key 对应的配置变更时触发的回调
 func (s *SettingService) OnChange(key string, fn func(newValue string)) {
-	log.Printf("[SETTING] OnChange registered for key %s", key) // DEBUG
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listeners[key] = append(s.listeners[key], fn)
-	
-	// DEBUG: 打印当前所有监听器
-	log.Printf("[SETTING] Current listeners: %v", func() []string {
-		keys := make([]string, 0, len(s.listeners))
-		for k := range s.listeners {
-			keys = append(keys, k)
-		}
-		return keys
-	}())
 }
 
 // Get 获取配置值；key 不存在时返回空字符串
@@ -61,7 +51,6 @@ func (s *SettingService) Get(key string) string {
 
 // Set 写入配置项（upsert），并通知所有注册了该 key 的观察者
 func (s *SettingService) Set(key, value string) error {
-	log.Printf("[SETTING] Set %s = %q", key, value) // DEBUG
 	err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
@@ -74,9 +63,15 @@ func (s *SettingService) Set(key, value string) error {
 	fns := s.listeners[key]
 	s.mu.RUnlock()
 
-	log.Printf("[SETTING] Notifying %d listeners for key %s", len(fns), key) // DEBUG
 	for _, fn := range fns {
-		go fn(value)
+		go func(cb func(string)) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[setting] callback panic for key %q: %v", key, r)
+				}
+			}()
+			cb(value)
+		}(fn)
 	}
 	return nil
 }
