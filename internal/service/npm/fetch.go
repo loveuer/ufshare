@@ -3,6 +3,7 @@ package npm
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 
 	"gorm.io/gorm"
@@ -30,31 +31,65 @@ type VersionSummary struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// ListPackages 返回所有已缓存/发布的包摘要列表
-func (s *Service) ListPackages() ([]PackageSummary, error) {
+// versionCount 用于 GROUP BY 聚合查询
+type versionCount struct {
+	PackageID   uint
+	Total       int
+	CachedCount int
+}
+
+// ListPackages 返回分页后的包摘要列表，同时返回总数。
+// search 为空时不过滤；单次查询聚合版本计数，无 N+1 问题。
+func (s *Service) ListPackages(page, pageSize int, search string) ([]PackageSummary, int64, error) {
+	query := s.db.Model(&model.NpmPackage{})
+	if search != "" {
+		like := "%" + search + "%"
+		query = query.Where("name LIKE ? OR description LIKE ?", like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
 	var pkgs []model.NpmPackage
-	if err := s.db.Find(&pkgs).Error; err != nil {
-		return nil, err
+	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&pkgs).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(pkgs) == 0 {
+		return []PackageSummary{}, total, nil
+	}
+
+	// 收集本页包的 ID，一次查出所有版本计数（消除 N+1）
+	pkgIDs := make([]uint, len(pkgs))
+	for i, p := range pkgs {
+		pkgIDs[i] = p.ID
+	}
+	var counts []versionCount
+	s.db.Model(&model.NpmVersion{}).
+		Select("package_id, COUNT(*) as total, SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END) as cached_count").
+		Where("package_id IN ?", pkgIDs).
+		Group("package_id").
+		Scan(&counts)
+	countMap := make(map[uint]versionCount, len(counts))
+	for _, c := range counts {
+		countMap[c.PackageID] = c
 	}
 
 	result := make([]PackageSummary, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		var total, cached int64
-		s.db.Model(&model.NpmVersion{}).Where("package_id = ?", pkg.ID).Count(&total)
-		s.db.Model(&model.NpmVersion{}).Where("package_id = ? AND cached = ?", pkg.ID, true).Count(&cached)
-
 		var distTags map[string]string
 		_ = json.Unmarshal([]byte(pkg.DistTags), &distTags)
-
+		c := countMap[pkg.ID]
 		result = append(result, PackageSummary{
 			Name:         pkg.Name,
 			Description:  pkg.Description,
 			DistTags:     distTags,
-			VersionCount: int(total),
-			CachedCount:  int(cached),
+			VersionCount: c.Total,
+			CachedCount:  c.CachedCount,
 		})
 	}
-	return result, nil
+	return result, total, nil
 }
 
 // ListVersions 返回某个包的版本列表
@@ -89,17 +124,20 @@ func (s *Service) ListVersions(name string) ([]VersionSummary, error) {
 
 // GetPackument 返回包的完整 packument。
 // 优先从本地 DB 构建；本地没有则代理上游并缓存。
-func (s *Service) GetPackument(name, baseURL string) (*Packument, error) {
-	pack, err := s.buildPackumentFromDB(name, baseURL)
+// abbreviated=true 时返回精简格式（仅含安装必需字段），响应体更小。
+func (s *Service) GetPackument(name, baseURL string, abbreviated bool) (*Packument, error) {
+	pack, err := s.buildPackumentFromDB(name, baseURL, abbreviated)
 	if err == nil {
 		return pack, nil
 	}
 	if !errors.Is(err, ErrPackageNotFound) {
 		return nil, err
 	}
-
-	// 本地未找到 → 代理上游
-	return s.proxyAndCachePackument(name, baseURL)
+	// 上游拉取后始终存完整元数据，再按需精简返回
+	if _, e := s.proxyAndCachePackument(name, ""); e != nil {
+		return nil, e
+	}
+	return s.buildPackumentFromDB(name, baseURL, abbreviated)
 }
 
 // GetVersion 返回指定版本的元数据（version-level packument）
@@ -123,20 +161,23 @@ func (s *Service) GetVersion(name, version string) (json.RawMessage, error) {
 	return json.RawMessage(ver.MetaJSON), nil
 }
 
-// GetTarball 返回 tarball 的本地磁盘路径。
-// 若未缓存则先从上游下载并缓存。
-func (s *Service) GetTarball(name, filename string) (string, error) {
-	diskPath := s.tarballPath(name, filename)
+// ServeTarball 将 tarball 内容写入 w。
+// 已缓存时直接从磁盘读取；未缓存时流式从上游拉取并同步写入磁盘缓存，
+// 使 npm 客户端无需等待完整下载即可开始接收字节。
+func (s *Service) ServeTarball(pkgName, filename string, w io.Writer) error {
+	diskPath := s.tarballPath(pkgName, filename)
 
-	// 已缓存，直接返回
-	if _, err := os.Stat(diskPath); err == nil {
-		return diskPath, nil
+	// 命中缓存：直接读磁盘
+	if f, err := os.Open(diskPath); err == nil {
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
 	}
 
-	// 未缓存 → 代理下载
-	if err := s.proxyAndCacheTarball(name, filename, diskPath); err != nil {
-		return "", err
+	// 未缓存：先解析上游 URL，再流式传输
+	upstreamURL, ver, err := s.resolveTarballURL(pkgName, filename)
+	if err != nil {
+		return err
 	}
-
-	return diskPath, nil
+	return s.streamAndCacheTarball(pkgName, ver, upstreamURL, diskPath, w)
 }

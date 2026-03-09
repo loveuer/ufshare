@@ -1,0 +1,20 @@
+2026/03/08 19:39:40 Default admin user created: admin/admin123
+2026/03/08 19:39:40 data dir : /tmp/ufshare-e2e-1773023980795
+2026/03/08 19:39:40 database : /tmp/ufshare-e2e-1773023980795/ufshare.db
+2026/03/08 19:39:40 listening: 127.0.0.1:18082
+[setup] seeded lodash
+[setup] seeded axios
+
+Running 8 tests using 1 worker
+
+  ✓  1 npm.spec.ts:21:7 › npm page › shows npm registry URL (489ms)
+  ✓  2 npm.spec.ts:26:7 › npm page › shows package count chip (472ms)
+  ✓  3 npm.spec.ts:33:7 › npm page › lists seeded packages (lodash, axios) (489ms)
+  ✓  4 npm.spec.ts:42:7 › npm page › shows latest dist-tag chip for each package (463ms)
+  ✓  5 npm.spec.ts:50:7 › npm page › expands lodash row and shows version list (571ms)
+  ✓  6 npm.spec.ts:66:7 › npm page › shows install command for each package (469ms)
+  ✓  7 npm.spec.ts:74:7 › npm page › copy registry button copies correct npm set command (500ms)
+  ✓  8 npm.spec.ts:86:7 › npm page › collapse expanded package row hides version list (921ms)
+[teardown] removed data dir: /tmp/ufshare-e2e-1773023980795
+
+  8 passed (5.6s)

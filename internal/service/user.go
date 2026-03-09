@@ -58,9 +58,26 @@ func (s *UserService) UpdateUser(id uint, updates map[string]interface{}) error 
 	return s.db.Model(&model.User{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// DeleteUser 删除用户
-func (s *UserService) DeleteUser(id uint) error {
-	return s.db.Delete(&model.User{}, id).Error
+// DeleteUser 删除用户。callerID 为当前操作者 ID。
+// 禁止：自删、删除管理员用户（需先撤销管理员权限）。
+func (s *UserService) DeleteUser(callerID, targetID uint) error {
+	if callerID == targetID {
+		return ErrCannotDeleteSelf
+	}
+
+	var target model.User
+	if err := s.db.First(&target, targetID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrUserNotFound
+		}
+		return err
+	}
+
+	if target.IsAdmin {
+		return ErrCannotDeleteAdmin
+	}
+
+	return s.db.Delete(&model.User{}, targetID).Error
 }
 
 // CreateUser 创建用户
@@ -85,7 +102,22 @@ func (s *UserService) CreateUser(username, password, email string, isAdmin bool)
 	return user, nil
 }
 
-// SetAdmin 设置管理员状态
+// ResetPassword 管理员直接重置用户密码（无需旧密码）
+func (s *UserService) ResetPassword(id uint, newPassword string) error {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	result := s.db.Model(&model.User{}).Where("id = ?", id).Update("password", string(hashed))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 func (s *UserService) SetAdmin(id uint, isAdmin bool) error {
 	return s.db.Model(&model.User{}).Where("id = ?", id).Update("is_admin", isAdmin).Error
 }

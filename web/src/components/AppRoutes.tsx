@@ -5,6 +5,7 @@ import LoginPage from '../pages/Login'
 import UsersPage from '../pages/Users'
 import FilesPage from '../pages/Files'
 import NpmPage from '../pages/Npm'
+import SettingsPage from '../pages/Settings'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -25,6 +26,7 @@ export default function AppRoutes() {
                 <Route path="files" element={<FilesPage />} />
                 <Route path="npm" element={<NpmPage />} />
                 <Route path="users" element={<UsersPage />} />
+                <Route path="settings" element={<SettingsPage />} />
               </Routes>
             </Layout>
           </RequireAuth>

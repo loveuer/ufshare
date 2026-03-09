@@ -112,7 +112,33 @@ func (h *AuthHandler) Login(c *ursa.Ctx) error {
 	})
 }
 
-// Me 获取当前用户信息
+// ChangePassword 用户自助修改密码，需要提供旧密码
+func (h *AuthHandler) ChangePassword(c *ursa.Ctx) error {
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "invalid request body"})
+	}
+	if req.OldPassword == "" || req.NewPassword == "" {
+		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "old_password and new_password are required"})
+	}
+	if len(req.NewPassword) < 6 {
+		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "new password must be at least 6 characters"})
+	}
+
+	userID := middleware.GetUserID(c)
+	if err := h.authService.ChangePassword(userID, req.OldPassword, req.NewPassword); err != nil {
+		if err == service.ErrInvalidCredentials {
+			return c.Status(400).JSON(ursa.Map{"code": 400, "message": "old password is incorrect"})
+		}
+		return c.Status(500).JSON(ursa.Map{"code": 500, "message": "internal server error"})
+	}
+
+	return c.JSON(ursa.Map{"code": 0, "message": "password changed successfully"})
+}
+
 func (h *AuthHandler) Me(c *ursa.Ctx) error {
 	userID := middleware.GetUserID(c)
 	user, err := h.authService.GetUserByID(userID)

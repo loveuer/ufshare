@@ -5,6 +5,7 @@ import (
 
 	"github.com/loveuer/ursa"
 
+	"gitea.loveuer.com/loveuer/ufshare/v2/internal/api/middleware"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
 )
 
@@ -176,7 +177,33 @@ func (h *UserHandler) Update(c *ursa.Ctx) error {
 	})
 }
 
-// Delete 删除用户
+// ResetPassword 管理员重置任意用户密码
+func (h *UserHandler) ResetPassword(c *ursa.Ctx) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "invalid user id"})
+	}
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := c.BodyParser(&req); err != nil || req.Password == "" {
+		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "password is required"})
+	}
+	if len(req.Password) < 6 {
+		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "password must be at least 6 characters"})
+	}
+
+	if err := h.userService.ResetPassword(uint(id), req.Password); err != nil {
+		if err == service.ErrUserNotFound {
+			return c.Status(404).JSON(ursa.Map{"code": 404, "message": "user not found"})
+		}
+		return c.Status(500).JSON(ursa.Map{"code": 500, "message": "internal server error"})
+	}
+
+	return c.JSON(ursa.Map{"code": 0, "message": "password reset successfully"})
+}
+
 func (h *UserHandler) Delete(c *ursa.Ctx) error {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -186,11 +213,18 @@ func (h *UserHandler) Delete(c *ursa.Ctx) error {
 		})
 	}
 
-	if err := h.userService.DeleteUser(uint(id)); err != nil {
-		return c.Status(500).JSON(ursa.Map{
-			"code":    500,
-			"message": "internal server error",
-		})
+	callerID := middleware.GetUserID(c)
+	if err := h.userService.DeleteUser(callerID, uint(id)); err != nil {
+		switch err {
+		case service.ErrCannotDeleteSelf:
+			return c.Status(400).JSON(ursa.Map{"code": 400, "message": "cannot delete yourself"})
+		case service.ErrCannotDeleteAdmin:
+			return c.Status(400).JSON(ursa.Map{"code": 400, "message": "cannot delete admin user; revoke admin role first"})
+		case service.ErrUserNotFound:
+			return c.Status(404).JSON(ursa.Map{"code": 404, "message": "user not found"})
+		default:
+			return c.Status(500).JSON(ursa.Map{"code": 500, "message": "internal server error"})
+		}
 	}
 
 	return c.JSON(ursa.Map{

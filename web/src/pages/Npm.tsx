@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Box, Chip, Collapse, IconButton, Paper, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, Tooltip,
-  Typography, CircularProgress, Alert, Stack,
+  Box, Chip, Collapse, IconButton, InputAdornment, Paper, Table, TableBody,
+  TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField,
+  Tooltip, Typography, CircularProgress, Alert, Stack,
 } from '@mui/material'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CloudIcon from '@mui/icons-material/Cloud'
 import StorageIcon from '@mui/icons-material/Storage'
+import SearchIcon from '@mui/icons-material/Search'
 import type { NpmPackage, NpmVersion } from '../types'
 import { npmApi } from '../api'
 
@@ -86,9 +87,7 @@ function PackageRow({ pkg, registryURL }: { pkg: NpmPackage; registryURL: string
   const [open, setOpen] = useState(false)
 
   const installCmd = `npm install ${pkg.name} --registry ${registryURL}`
-
   const copy = (text: string) => navigator.clipboard.writeText(text)
-
   const latest = pkg.dist_tags?.latest ?? ''
 
   return (
@@ -177,48 +176,82 @@ function PackageRow({ pkg, registryURL }: { pkg: NpmPackage; registryURL: string
 
 // ── 主页面 ────────────────────────────────────────────────────────────────────
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50]
+
 export default function NpmPage() {
   const [packages, setPackages] = useState<NpmPackage[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)            // MUI TablePagination 从 0 开始
+  const [pageSize, setPageSize] = useState(20)
+  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // 从当前页面地址推断 registry URL
   const registryURL = `${window.location.origin}/npm`
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (p: number, ps: number, s: string) => {
     setLoading(true)
     try {
-      const res = await npmApi.listPackages()
+      const res = await npmApi.listPackages(p + 1, ps, s)
       setPackages(res.data.data ?? [])
+      setTotal((res.data as any).total ?? 0)
     } finally {
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load(page, pageSize, search) }, [load, page, pageSize, search])
+
+  // 搜索防抖：停止输入 400ms 后触发
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setPage(0)
+      setSearch(searchInput)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} gap={2} flexWrap="wrap">
         <Box display="flex" alignItems="center" gap={1}>
           <Typography fontWeight="medium">npm Registry</Typography>
-          <Chip label={`${packages.length} packages`} size="small" />
+          <Chip label={`${total} packages`} size="small" />
         </Box>
-        <Tooltip title="npm 配置地址">
-          <Box
-            sx={{
-              bgcolor: 'action.selected', borderRadius: 1, px: 1.5, py: 0.5,
-              fontFamily: 'monospace', fontSize: 12, display: 'flex', alignItems: 'center', gap: 1,
+
+        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+          <TextField
+            size="small"
+            placeholder="Search packages..."
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            sx={{ width: 220 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
             }}
-          >
-            <Typography variant="body2" fontFamily="monospace" fontSize={12}>
-              {registryURL}
-            </Typography>
-            <IconButton size="small" sx={{ p: 0.25 }}
-              onClick={() => navigator.clipboard.writeText(`npm set registry ${registryURL}`)}>
-              <ContentCopyIcon sx={{ fontSize: 14 }} />
-            </IconButton>
-          </Box>
-        </Tooltip>
+          />
+
+          <Tooltip title="npm 配置地址">
+            <Box
+              sx={{
+                bgcolor: 'action.selected', borderRadius: 1, px: 1.5, py: 0.5,
+                fontFamily: 'monospace', fontSize: 12, display: 'flex', alignItems: 'center', gap: 1,
+              }}
+            >
+              <Typography variant="body2" fontFamily="monospace" fontSize={12}>
+                {registryURL}
+              </Typography>
+              <IconButton size="small" sx={{ p: 0.25 }}
+                onClick={() => navigator.clipboard.writeText(`npm set registry ${registryURL}`)}>
+                <ContentCopyIcon sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Box>
+          </Tooltip>
+        </Box>
       </Box>
 
       <TableContainer component={Paper} variant="outlined">
@@ -239,7 +272,10 @@ export default function NpmPage() {
               : packages.length === 0
                 ? <TableRow><TableCell colSpan={6} align="center">
                     <Typography color="text.secondary" sx={{ py: 3 }}>
-                      No packages yet. Use <code>npm publish --registry {registryURL}</code> to publish, or install any package to proxy &amp; cache it.
+                      {search
+                        ? `No packages matching "${search}"`
+                        : <>No packages yet. Use <code>npm publish --registry {registryURL}</code> to publish, or install any package to proxy &amp; cache it.</>
+                      }
                     </Typography>
                   </TableCell></TableRow>
                 : packages.map(pkg => (
@@ -248,6 +284,16 @@ export default function NpmPage() {
             }
           </TableBody>
         </Table>
+        <TablePagination
+          component="div"
+          count={total}
+          page={page}
+          onPageChange={(_, p) => setPage(p)}
+          rowsPerPage={pageSize}
+          onRowsPerPageChange={e => { setPageSize(parseInt(e.target.value)); setPage(0) }}
+          rowsPerPageOptions={PAGE_SIZE_OPTIONS}
+          labelRowsPerPage="每页"
+        />
       </TableContainer>
     </Box>
   )

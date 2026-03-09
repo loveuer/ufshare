@@ -6,6 +6,8 @@ export const authApi = {
   login: (username: string, password: string) =>
     http.post<LoginResponse>('/auth/login', { username, password }),
   me: () => http.get<ApiResponse<User>>('/auth/me'),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    http.put<ApiResponse<null>>('/auth/password', { old_password: oldPassword, new_password: newPassword }),
 }
 
 // 用户管理
@@ -17,15 +19,22 @@ export const userApi = {
     http.post<ApiResponse<User>>('/admin/users', data),
   update: (id: number, data: Partial<User> & { password?: string }) =>
     http.put<ApiResponse<null>>(`/admin/users/${id}`, data),
+  resetPassword: (id: number, password: string) =>
+    http.put<ApiResponse<null>>(`/admin/users/${id}/password`, { password }),
   delete: (id: number) => http.delete<ApiResponse<null>>(`/admin/users/${id}`),
+}
+
+// 系统设置
+export const settingApi = {
+  getAll: () => http.get<ApiResponse<Record<string, string>>>('/admin/settings'),
+  update: (data: Record<string, string>) => http.put<ApiResponse<null>>('/admin/settings', data),
 }
 
 // npm 仓库
 export const npmApi = {
-  listPackages: () =>
-    http.get<ApiResponse<NpmPackage[]>>('/npm/packages'),
+  listPackages: (page = 1, pageSize = 20, search = '') =>
+    http.get<ApiResponse<NpmPackage[]>>('/npm/packages', { params: { page, page_size: pageSize, search: search || undefined } }),
   listVersions: (name: string) => {
-    // scoped 包 @scope/name 拆分传参
     if (name.startsWith('@')) {
       const [scope, pkg] = name.slice(1).split('/')
       return http.get<ApiResponse<NpmVersion[]>>(`/npm/packages/${pkg}`, { params: { scope } })

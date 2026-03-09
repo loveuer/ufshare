@@ -13,6 +13,9 @@ import (
 
 var (
 	ErrUserNotFound       = errors.New("user not found")
+	ErrCannotDeleteSelf   = errors.New("cannot delete yourself")
+	ErrCannotDeleteAdmin  = errors.New("cannot delete admin user; revoke admin first")
+	ErrLastAdmin          = errors.New("cannot remove the last admin account")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUserExists         = errors.New("user already exists")
 	ErrUserDisabled       = errors.New("user is disabled")
@@ -141,6 +144,28 @@ func (s *AuthService) VerifyCredentials(username, password string) (*model.User,
 	}
 
 	return &user, nil
+}
+
+// ChangePassword 自助修改密码，需验证旧密码
+func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword string) error {
+	var user model.User
+	if err := s.db.First(&user, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrUserNotFound
+		}
+		return err
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
+		return ErrInvalidCredentials
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.db.Model(&user).Update("password", string(hashed)).Error
 }
 
 func (s *AuthService) generateToken(user *model.User) (string, error) {

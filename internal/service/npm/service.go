@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/model"
+	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
 )
 
 var (
@@ -24,21 +26,56 @@ var (
 
 // Service npm 仓库服务，负责本地发布、代理缓存、元数据管理
 type Service struct {
-	db         *gorm.DB
-	dataDir    string       // {data}/npm
-	upstream   string       // 上游 registry，默认 https://registry.npmjs.org
-	httpClient *http.Client // 用于代理请求
+	db          *gorm.DB
+	dataDir     string           // {data}/npm
+	settingSvc  *service.SettingService
+	httpClient  *http.Client
+	sfGroup     singleflight.Group // 防止并发重复代理同一包
 }
 
-func New(db *gorm.DB, dataDir string) *Service {
+func New(db *gorm.DB, dataDir string, settingSvc *service.SettingService) *Service {
 	return &Service{
-		db:       db,
-		dataDir:  filepath.Join(dataDir, "npm"),
-		upstream: "https://registry.npmjs.org",
+		db:         db,
+		dataDir:    filepath.Join(dataDir, "npm"),
+		settingSvc: settingSvc,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
 	}
+}
+
+// upstream 动态读取上游地址
+func (s *Service) upstream() string {
+	return s.settingSvc.GetNpmUpstream()
+}
+
+// abbreviatedFields 是 abbreviated packument 格式（application/vnd.npm.install-v1+json）
+// 中每个 version 对象需要保留的字段，其余字段（readme、scripts、homepage 等）一律丢弃。
+var abbreviatedFields = map[string]bool{
+	"name": true, "version": true, "dist": true,
+	"dependencies": true, "optionalDependencies": true,
+	"peerDependencies": true, "peerDependenciesMeta": true,
+	"devDependencies": true, "bundleDependencies": true,
+	"engines": true, "deprecated": true, "_hasShrinkwrap": true,
+}
+
+// abbreviateVersionMeta 将完整的 version 元数据 JSON 精简为仅含安装必需字段的格式。
+func abbreviateVersionMeta(raw json.RawMessage) json.RawMessage {
+	var full map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &full); err != nil {
+		return raw
+	}
+	abbr := make(map[string]json.RawMessage, len(abbreviatedFields))
+	for k, v := range full {
+		if abbreviatedFields[k] {
+			abbr[k] = v
+		}
+	}
+	result, err := json.Marshal(abbr)
+	if err != nil {
+		return raw
+	}
+	return result
 }
 
 // ── 磁盘路径辅助 ─────────────────────────────────────────────────────────────
@@ -121,7 +158,7 @@ func sanitizePkgName(name string) string {
 
 // ── 从 DB 构建 Packument ──────────────────────────────────────────────────────
 
-func (s *Service) buildPackumentFromDB(name, baseURL string) (*Packument, error) {
+func (s *Service) buildPackumentFromDB(name, baseURL string, abbreviated bool) (*Packument, error) {
 	var pkg model.NpmPackage
 	if err := s.db.Where("name = ?", name).First(&pkg).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -149,6 +186,9 @@ func (s *Service) buildPackumentFromDB(name, baseURL string) (*Packument, error)
 		rewritten, err := s.rewriteTarballURL(json.RawMessage(v.MetaJSON), name, v.TarballName, baseURL)
 		if err != nil {
 			rewritten = json.RawMessage(v.MetaJSON)
+		}
+		if abbreviated {
+			rewritten = abbreviateVersionMeta(rewritten)
 		}
 		versionMap[v.Version] = rewritten
 	}

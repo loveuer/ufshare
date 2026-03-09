@@ -3,7 +3,7 @@ package handler
 import (
 	"errors"
 	"fmt"
-	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/loveuer/ursa"
@@ -25,13 +25,29 @@ func NewNpmHandler(npm *npmsvc.Service, auth *service.AuthService) *NpmHandler {
 
 // ── 管理接口（供前端使用）────────────────────────────────────────────────────
 
-// ListPackages GET /api/v1/npm/packages
+// ListPackages GET /api/v1/npm/packages?page=1&page_size=20&search=
 func (h *NpmHandler) ListPackages(c *ursa.Ctx) error {
-	list, err := h.npm.ListPackages()
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	search := c.Query("search")
+
+	list, total, err := h.npm.ListPackages(page, pageSize, search)
 	if err != nil {
 		return c.Status(500).JSON(ursa.Map{"code": 500, "message": err.Error()})
 	}
-	return c.JSON(ursa.Map{"code": 0, "message": "success", "data": list})
+	return c.JSON(ursa.Map{
+		"code": 0, "message": "success",
+		"data":      list,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
 // ListVersions GET /api/v1/npm/packages/:name
@@ -95,8 +111,9 @@ func (h *NpmHandler) Whoami(c *ursa.Ctx) error {
 func (h *NpmHandler) GetPackument(c *ursa.Ctx) error {
 	name := resolvePkgName(c)
 	baseURL := resolveBaseURL(c)
+	abbreviated := strings.Contains(c.Request.Header.Get("Accept"), "vnd.npm.install-v1+json")
 
-	pack, err := h.npm.GetPackument(name, baseURL)
+	pack, err := h.npm.GetPackument(name, baseURL, abbreviated)
 	if err != nil {
 		if errors.Is(err, npmsvc.ErrPackageNotFound) {
 			return c.Status(404).JSON(ursa.Map{"error": "package not found"})
@@ -104,6 +121,9 @@ func (h *NpmHandler) GetPackument(c *ursa.Ctx) error {
 		return c.Status(502).JSON(ursa.Map{"error": err.Error()})
 	}
 
+	if abbreviated {
+		c.Set("Content-Type", "application/vnd.npm.install-v1+json")
+	}
 	return c.JSON(pack)
 }
 
@@ -128,21 +148,18 @@ func (h *NpmHandler) GetVersion(c *ursa.Ctx) error {
 // ── tarball 下载 ──────────────────────────────────────────────────────────────
 
 // GetTarball GET /npm/:package/-/:file  (或 /npm/@:scope/:name/-/:file)
-// 本地缓存优先，缺失时从上游拉取并缓存
+// 已缓存时直接从磁盘返回；未缓存时流式从上游拉取（边下边传），同时写入本地缓存。
 func (h *NpmHandler) GetTarball(c *ursa.Ctx) error {
 	name := resolvePkgName(c)
 	filename := c.Param("file")
 
-	diskPath, err := h.npm.GetTarball(name, filename)
-	if err != nil {
+	c.Set("Content-Type", "application/octet-stream")
+	if err := h.npm.ServeTarball(name, filename, c.Writer); err != nil {
 		if errors.Is(err, npmsvc.ErrTarballNotFound) {
 			return c.Status(404).JSON(ursa.Map{"error": "tarball not found"})
 		}
 		return c.Status(502).JSON(ursa.Map{"error": err.Error()})
 	}
-
-	c.Set("Content-Type", "application/octet-stream")
-	http.ServeFile(c.Writer, c.Request, diskPath)
 	return nil
 }
 

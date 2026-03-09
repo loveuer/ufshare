@@ -7,34 +7,56 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gorm.io/gorm"
 
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/model"
 )
 
-// proxyAndCachePackument 从上游拉取 packument，持久化到 DB，返回带本地 URL 的 packument
+// proxyAndCachePackument 从上游拉取 packument，持久化到 DB，返回带本地 URL 的 packument。
+// 内部通过 singleflight 合并同名包的并发请求，避免 SQLite 并发写冲突。
 func (s *Service) proxyAndCachePackument(name, baseURL string) (*Packument, error) {
-	upstreamURL := fmt.Sprintf("%s/%s", s.upstream, name)
+	// singleflight：只有一个 goroutine 真正去上游拉取并写 DB
+	type sfResult struct {
+		err error
+	}
+	v, _, _ := s.sfGroup.Do("packument:"+name, func() (interface{}, error) {
+		return &sfResult{err: s.fetchAndSavePackument(name)}, nil
+	})
+	if res := v.(*sfResult); res.err != nil {
+		// 如果是 404，返回 ErrPackageNotFound
+		if errors.Is(res.err, ErrPackageNotFound) {
+			return nil, ErrPackageNotFound
+		}
+		return nil, res.err
+	}
+
+	// 从 DB 构建带本地 URL 的 packument（每个调用者用各自的 baseURL）
+	return s.buildPackumentFromDB(name, baseURL, false)
+}
+
+// fetchAndSavePackument 从上游拉取 packument 并写入 DB（不含 baseURL 改写）
+func (s *Service) fetchAndSavePackument(name string) error {
+	upstreamURL := fmt.Sprintf("%s/%s", s.upstream(), name)
 	resp, err := s.httpClient.Get(upstreamURL)
 	if err != nil {
-		return nil, fmt.Errorf("upstream unreachable: %w", err)
+		return fmt.Errorf("upstream unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
-		return nil, ErrPackageNotFound
+		return ErrPackageNotFound
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("upstream returned HTTP %d", resp.StatusCode)
+		return fmt.Errorf("upstream returned HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read upstream response: %w", err)
+		return fmt.Errorf("read upstream response: %w", err)
 	}
 
-	// 解析上游 packument
 	var upstream struct {
 		Name        string                     `json:"name"`
 		Description string                     `json:"description"`
@@ -43,72 +65,85 @@ func (s *Service) proxyAndCachePackument(name, baseURL string) (*Packument, erro
 		Versions    map[string]json.RawMessage `json:"versions"`
 	}
 	if err := json.Unmarshal(body, &upstream); err != nil {
-		return nil, fmt.Errorf("parse upstream packument: %w", err)
+		return fmt.Errorf("parse upstream packument: %w", err)
 	}
 
-	// 写入 DB（create or update）
 	pkg, err := s.upsertPackage(upstream.Name, upstream.Description, upstream.Readme, upstream.DistTags)
 	if err != nil {
-		return nil, fmt.Errorf("cache package metadata: %w", err)
+		return fmt.Errorf("cache package metadata: %w", err)
 	}
 
-	// 写入版本元数据（跳过已存在的版本）
+	// 一次查出已存在的版本号，避免逐条 SELECT
+	var existingVersions []string
+	s.db.Model(&model.NpmVersion{}).
+		Where("package_id = ?", pkg.ID).
+		Pluck("version", &existingVersions)
+	existingSet := make(map[string]struct{}, len(existingVersions))
+	for _, v := range existingVersions {
+		existingSet[v] = struct{}{}
+	}
+
+	// 收集需要新建的版本，批量插入
+	var newVersions []model.NpmVersion
 	for version, metaRaw := range upstream.Versions {
-		var existing model.NpmVersion
-		if s.db.Where("package_id = ? AND version = ?", pkg.ID, version).First(&existing).Error == nil {
+		if _, exists := existingSet[version]; exists {
 			continue
 		}
-
-		di := extractDistInfo(metaRaw, name, version)
-
-		npmVer := model.NpmVersion{
+		di := extractDistInfo(metaRaw, upstream.Name, version)
+		newVersions = append(newVersions, model.NpmVersion{
 			PackageID:   pkg.ID,
 			Version:     version,
-			MetaJSON:    string(metaRaw), // 保存原始上游 URL，对外输出时改写
+			MetaJSON:    string(metaRaw),
 			TarballName: di.tarballName,
 			Shasum:      di.shasum,
 			Integrity:   di.integrity,
-			Cached:      false, // tarball 尚未缓存
-		}
-		s.db.Create(&npmVer) //nolint:errcheck // 单个版本失败不影响整体
+			Cached:      false,
+		})
 	}
-
-	// 从 DB 构建带本地 URL 的 packument 返回
-	return s.buildPackumentFromDB(name, baseURL)
+	if len(newVersions) > 0 {
+		s.db.CreateInBatches(newVersions, 100) //nolint:errcheck
+	}
+	return nil
 }
 
-// proxyAndCacheTarball 从上游下载 tarball 并保存到本地磁盘
-func (s *Service) proxyAndCacheTarball(pkgName, filename, diskPath string) error {
-	// 从 DB 查 version 记录，以获取上游 tarball URL
+// resolveTarballURL 从 DB 查找 tarball 的上游 URL。
+// 若 DB 中无记录，则先拉取 packument 填充，再重查。
+func (s *Service) resolveTarballURL(pkgName, filename string) (string, model.NpmVersion, error) {
 	var ver model.NpmVersion
-	err := s.db.
-		Joins("JOIN npm_packages ON npm_packages.id = npm_versions.package_id").
-		Where("npm_packages.name = ? AND npm_versions.tarball_name = ?", pkgName, filename).
-		First(&ver).Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// DB 中没有记录，尝试先缓存 packument（会填充版本信息）
-		if _, proxyErr := s.proxyAndCachePackument(pkgName, ""); proxyErr != nil {
-			return ErrTarballNotFound
-		}
-		// 重新查询
-		if err2 := s.db.
+	query := func() error {
+		return s.db.
 			Joins("JOIN npm_packages ON npm_packages.id = npm_versions.package_id").
 			Where("npm_packages.name = ? AND npm_versions.tarball_name = ?", pkgName, filename).
-			First(&ver).Error; err2 != nil {
-			return ErrTarballNotFound
-		}
-	} else if err != nil {
-		return err
+			First(&ver).Error
 	}
 
-	// 从元数据中提取上游 URL
+	if err := query(); errors.Is(err, gorm.ErrRecordNotFound) {
+		// DB 中无记录 → 先缓存 packument
+		if proxyErr := s.fetchAndSavePackument(pkgName); proxyErr != nil {
+			return "", ver, ErrTarballNotFound
+		}
+		if err2 := query(); err2 != nil {
+			return "", ver, ErrTarballNotFound
+		}
+	} else if err != nil {
+		return "", ver, err
+	}
+
 	di := extractDistInfo(json.RawMessage(ver.MetaJSON), pkgName, ver.Version)
 	upstreamURL := di.upstreamURL
 	if upstreamURL == "" {
-		upstreamURL = fmt.Sprintf("%s/%s/-/%s", s.upstream, pkgName, filename)
+		upstreamURL = fmt.Sprintf("%s/%s/-/%s", s.upstream(), pkgName, filename)
 	}
+	return upstreamURL, ver, nil
+}
 
+// streamAndCacheTarball 从 upstreamURL 流式拉取 tarball，同时：
+//   - 即时转发字节流给 w（npm 客户端无需等待完整下载）
+//   - 用 TeeReader 并行写入临时磁盘文件，下载完成后原子 rename 为最终缓存路径
+//
+// 多个并发请求同一 tarball 各自独立流式下载（使用唯一 tmp 文件名），
+// 最后一个 rename 覆盖前一个（内容相同，幂等）。
+func (s *Service) streamAndCacheTarball(pkgName string, ver model.NpmVersion, upstreamURL, diskPath string, w io.Writer) error {
 	resp, err := s.httpClient.Get(upstreamURL)
 	if err != nil {
 		return fmt.Errorf("upstream unreachable: %w", err)
@@ -119,31 +154,31 @@ func (s *Service) proxyAndCacheTarball(pkgName, filename, diskPath string) error
 		return fmt.Errorf("upstream returned HTTP %d for tarball", resp.StatusCode)
 	}
 
-	// 原子写：先写临时文件，成功后 rename
-	if err := ensureDir(filepath.Dir(diskPath)); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
+	// 准备缓存目录和唯一临时文件（避免并发写冲突）
+	var cacheFile *os.File
+	tmp := fmt.Sprintf("%s.tmp.%d", diskPath, time.Now().UnixNano())
+	if err2 := ensureDir(filepath.Dir(diskPath)); err2 == nil {
+		cacheFile, _ = os.Create(tmp)
 	}
 
-	tmp := diskPath + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+	var src io.Reader = resp.Body
+	if cacheFile != nil {
+		src = io.TeeReader(resp.Body, cacheFile) // 边读边写磁盘
 	}
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("download tarball: %w", err)
+	_, copyErr := io.Copy(w, src) // 立即推送给客户端
+
+	if cacheFile != nil {
+		cacheFile.Close()
+		if copyErr == nil {
+			if renameErr := os.Rename(tmp, diskPath); renameErr == nil {
+				// 标记为已缓存（忽略 DB 错误，不影响已完成的传输）
+				s.db.Model(&ver).Update("cached", true) //nolint:errcheck
+			}
+		} else {
+			os.Remove(tmp)
+		}
 	}
-	f.Close()
 
-	if err := os.Rename(tmp, diskPath); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("save tarball: %w", err)
-	}
-
-	// 标记为已缓存
-	s.db.Model(&ver).Update("cached", true) //nolint:errcheck
-
-	return nil
+	return copyErr
 }

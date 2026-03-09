@@ -43,12 +43,16 @@ export default function FilesPage() {
     }
     xhr.onload = () => {
       setUploading(false)
-      loadFiles()
+      if (xhr.status >= 200 && xhr.status < 300) {
+        loadFiles()
+      } else {
+        alert(`Upload failed: ${xhr.status} ${xhr.statusText}`)
+      }
     }
-    xhr.onerror = () => setUploading(false)
+    xhr.onerror = () => { setUploading(false); alert('Upload failed: network error') }
 
     const token = localStorage.getItem('token')
-    xhr.open('PUT', `/file-store/${file.name}`)
+    xhr.open('PUT', `/file-store/${encodeURIComponent(file.name)}`)
     xhr.setRequestHeader('Content-Type', 'application/octet-stream')
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.send(file)

@@ -7,6 +7,7 @@ import { DataGrid, type GridColDef } from '@mui/x-data-grid'
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
+import KeyIcon from '@mui/icons-material/Key'
 import type { User } from '../types'
 import { userApi } from '../api'
 
@@ -24,6 +25,11 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createData, setCreateData] = useState({ username: '', password: '', email: '', is_admin: false })
   const [createError, setCreateError] = useState('')
+
+  // 重置密码
+  const [resetTarget, setResetTarget] = useState<User | null>(null)
+  const [resetPwd, setResetPwd] = useState('')
+  const [resetError, setResetError] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -73,6 +79,20 @@ export default function UsersPage() {
     }
   }
 
+  const handleResetPassword = async () => {
+    setResetError('')
+    if (!resetPwd) { setResetError('Password is required'); return }
+    if (resetPwd.length < 6) { setResetError('Password must be at least 6 characters'); return }
+    try {
+      await userApi.resetPassword(resetTarget!.id, resetPwd)
+      setResetTarget(null)
+      setResetPwd('')
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+      setResetError(msg || 'Failed to reset password')
+    }
+  }
+
   const columns: GridColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },
     { field: 'username', headerName: 'Username', flex: 1 },
@@ -90,11 +110,16 @@ export default function UsersPage() {
       ),
     },
     {
-      field: 'actions', headerName: 'Actions', width: 100, sortable: false,
+      field: 'actions', headerName: 'Actions', width: 130, sortable: false,
       renderCell: ({ row }) => (
         <Box>
           <Tooltip title="Edit">
             <IconButton size="small" onClick={() => handleEdit(row)}><EditIcon fontSize="small" /></IconButton>
+          </Tooltip>
+          <Tooltip title="Reset Password">
+            <IconButton size="small" onClick={() => { setResetTarget(row); setResetPwd(''); setResetError('') }}>
+              <KeyIcon fontSize="small" />
+            </IconButton>
           </Tooltip>
           <Tooltip title="Delete">
             <IconButton size="small" color="error" onClick={() => handleDelete(row.id)}><DeleteIcon fontSize="small" /></IconButton>
@@ -186,7 +211,27 @@ export default function UsersPage() {
           <Button variant="contained" onClick={handleSave}>Save</Button>
         </DialogActions>
       </Dialog>
+
+      {/* 重置密码对话框（管理员） */}
+      <Dialog open={!!resetTarget} onClose={() => setResetTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset Password: {resetTarget?.username}</DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} pt={1}>
+            {resetError && <Typography color="error" variant="body2">{resetError}</Typography>}
+            <TextField
+              label="New Password *"
+              type="password"
+              value={resetPwd}
+              onChange={(e) => setResetPwd(e.target.value)}
+              autoFocus
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setResetTarget(null)}>Cancel</Button>
+          <Button variant="contained" onClick={handleResetPassword}>Reset</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
-
