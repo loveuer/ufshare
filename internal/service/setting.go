@@ -16,8 +16,13 @@ const (
 	SettingNpmAddr     = "npm.addr"
 	SettingFileEnabled = "file.enabled"
 	SettingFileAddr    = "file.addr"
+	SettingGoUpstream  = "go.upstream"
+	SettingGoPrivate   = "go.private"
+	SettingGoEnabled   = "go.enabled"
+	SettingGoAddr      = "go.addr"
 
 	DefaultNpmUpstream = "https://registry.npmmirror.com"
+	DefaultGoUpstream  = "https://goproxy.cn,direct"
 )
 
 type SettingService struct {
@@ -102,6 +107,29 @@ func (s *SettingService) GetFileEnabled() bool {
 // GetFileAddr 返回 file-store 专用端口监听地址，未配置时返回空字符串
 func (s *SettingService) GetFileAddr() string {
 	return s.Get(SettingFileAddr)
+}
+
+// GetGoUpstream 返回 Go 模块代理上游地址，未配置时返回默认值
+func (s *SettingService) GetGoUpstream() string {
+	if v := s.Get(SettingGoUpstream); v != "" {
+		return v
+	}
+	return DefaultGoUpstream
+}
+
+// GetGoPrivate 返回 Go 私有模块模式
+func (s *SettingService) GetGoPrivate() string {
+	return s.Get(SettingGoPrivate)
+}
+
+// GetGoEnabled 返回 Go 模块代理专用端口是否已启用
+func (s *SettingService) GetGoEnabled() bool {
+	return s.Get(SettingGoEnabled) == "true"
+}
+
+// GetGoAddr 返回 Go 模块代理专用端口监听地址，未配置时返回空字符串
+func (s *SettingService) GetGoAddr() string {
+	return s.Get(SettingGoAddr)
 }
 
 // GetAll 返回所有配置项

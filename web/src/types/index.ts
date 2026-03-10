@@ -58,3 +58,11 @@ export interface PageData<T> {
   total: number
   page: number
 }
+
+export interface GoCacheStats {
+  cache_dir: string
+  size_bytes: number
+  file_count: number
+  upstream: string
+  goprivate: string
+}

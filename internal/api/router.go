@@ -58,7 +58,7 @@ func (r *Router) SPAHandler() ursa.HandlerFunc {
 	}
 }
 
-func (r *Router) Setup(app *ursa.App) {
+func (r *Router) Setup(app *ursa.App, goHandler *handler.GoHandler) {
 	authHandler    := handler.NewAuthHandler(r.authService)
 	userHandler    := handler.NewUserHandler(r.userService)
 	fileHandler    := handler.NewFileHandler(r.fileService)
@@ -91,11 +91,21 @@ func (r *Router) Setup(app *ursa.App) {
 	npmAdmin.Get("/packages", npmHandler.ListPackages)
 	npmAdmin.Get("/packages/:name", npmHandler.ListVersions)
 
+	// go 模块管理接口（供前端使用，需认证）
+	if goHandler != nil {
+		handler.RegisterGoAdminRoutes(api, goHandler, r.authService)
+	}
+
 	// ── file-store（主端口，带 /file-store 前缀）──────────────────────────────
 	RegisterFileRoutes(app, fileHandler, r.authService, "/file-store")
 
 	// ── npm registry（主端口，带 /npm 前缀）──────────────────────────────────
 	RegisterNpmRoutes(app, npmHandler, r.authService, "/npm")
+
+	// ── go proxy（主端口，带 /go 前缀）────────────────────────────────────────
+	if goHandler != nil {
+		handler.RegisterGoRoutes(app, goHandler, r.authService, "/go")
+	}
 
 	// ── 前端静态文件 + SPA fallback（由 ursa.Config.NotFoundHandler 处理）──────
 }

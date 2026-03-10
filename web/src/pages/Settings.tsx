@@ -5,6 +5,7 @@ import {
 } from '@mui/material'
 import StorageIcon from '@mui/icons-material/Storage'
 import FolderIcon from '@mui/icons-material/Folder'
+import TerminalIcon from '@mui/icons-material/Terminal'
 import { settingApi } from '../api'
 
 interface FieldConfig {
@@ -58,6 +59,34 @@ const MODULES: ModuleConfig[] = [
         label: 'Dedicated Listen Address',
         hint: 'npm clients point here directly: npm set registry http://host:4873',
         placeholder: '0.0.0.0:4873',
+      },
+    ],
+  },
+  {
+    icon: <TerminalIcon fontSize="small" />,
+    title: 'Go Modules',
+    enabledKey: 'go.enabled',
+    enabledLabel: 'Enable dedicated port',
+    fields: [
+      {
+        key: 'go.upstream',
+        label: 'Upstream Proxy',
+        hint: 'Go proxy upstream servers, comma separated',
+        placeholder: 'https://goproxy.cn,direct',
+        alwaysShow: true,
+      },
+      {
+        key: 'go.private',
+        label: 'GOPRIVATE',
+        hint: 'Modules that should not use the proxy (e.g., github.com/mycompany/*)',
+        placeholder: 'github.com/mycompany/*',
+        alwaysShow: true,
+      },
+      {
+        key: 'go.addr',
+        label: 'Dedicated Listen Address',
+        hint: 'Go clients point here directly: export GOPROXY=http://host:8081',
+        placeholder: '0.0.0.0:8081',
       },
     ],
   },

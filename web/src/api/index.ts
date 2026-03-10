@@ -1,5 +1,5 @@
 import http from './http'
-import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion } from '../types'
+import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion, GoCacheStats } from '../types'
 
 // 认证
 export const authApi = {
@@ -41,4 +41,10 @@ export const npmApi = {
     }
     return http.get<ApiResponse<NpmVersion[]>>(`/npm/packages/${name}`)
   },
+}
+
+// Go 模块代理
+export const goApi = {
+  getStats: () => http.get<ApiResponse<GoCacheStats>>('/go/stats'),
+  cleanCache: () => http.delete<ApiResponse<null>>('/go/cache'),
 }

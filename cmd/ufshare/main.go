@@ -16,6 +16,7 @@ import (
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/pkg/database"
 	pkgserver "gitea.loveuer.com/loveuer/ufshare/v2/internal/pkg/server"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
+	gosvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/goproxy"
 	npmsvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/npm"
 	"gitea.loveuer.com/loveuer/ufshare/v2/web"
 )
@@ -47,6 +48,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "开启 debug 模式（打印 GORM 日志及详细流程）")
 	cmd.Flags().StringVar(&cfg.NpmAddr, "npm-addr", "", "npm 专用端口（可选，如 0.0.0.0:4873）")
 	cmd.Flags().StringVar(&cfg.FileAddr, "file-addr", "", "file-store 专用端口（可选，如 0.0.0.0:8001）")
+	cmd.Flags().StringVar(&cfg.GoAddr, "go-addr", "", "go 模块代理专用端口（可选，如 0.0.0.0:8081）")
 
 	// 添加子命令
 	cmd.AddCommand(newInstallCmd())
@@ -73,6 +75,7 @@ func run(cfg *config.Config) error {
 	fileService    := service.NewFileService(db, cfg.Data)
 	settingService := service.NewSettingService(db)
 	npmService     := npmsvc.New(db, cfg.Data, settingService)
+	goService      := gosvc.New(db, cfg.Data, settingService)
 
 	if err := createDefaultAdmin(authService, userService); err != nil {
 		log.Printf("warning: failed to create default admin: %v", err)
@@ -82,6 +85,7 @@ func run(cfg *config.Config) error {
 
 	npmHandler  := handler.NewNpmHandler(npmService, authService)
 	fileHandler := handler.NewFileHandler(fileService)
+	goHandler   := handler.NewGoHandler(goService, authService)
 
 	npmDedicated := pkgserver.New("npm", cfg.BodySize, func(app *ursa.App) {
 		api.RegisterNpmRoutes(app, npmHandler, authService, "")
@@ -92,6 +96,9 @@ func run(cfg *config.Config) error {
 		app.Put("/*path", middleware.Auth(authService), fileHandler.Upload)
 		app.Delete("/*path", middleware.Auth(authService), fileHandler.Delete)
 	})
+	goDedicated := pkgserver.New("go", cfg.BodySize, func(app *ursa.App) {
+		handler.RegisterGoRoutes(app, goHandler, authService, "")
+	})
 
 	// 启动参数写入 settings（仅当 DB 中尚未配置时作为初始值）
 	if cfg.NpmAddr != "" && settingService.GetNpmAddr() == "" {
@@ -101,6 +108,10 @@ func run(cfg *config.Config) error {
 	if cfg.FileAddr != "" && settingService.GetFileAddr() == "" {
 		_ = settingService.Set(service.SettingFileAddr, cfg.FileAddr)
 		_ = settingService.Set(service.SettingFileEnabled, "true")
+	}
+	if cfg.GoAddr != "" && settingService.GetGoAddr() == "" {
+		_ = settingService.Set(service.SettingGoAddr, cfg.GoAddr)
+		_ = settingService.Set(service.SettingGoEnabled, "true")
 	}
 
 	// tryDedicated 根据 enabled + addr 决定启动/停止独立端口
@@ -115,6 +126,7 @@ func run(cfg *config.Config) error {
 	// 启动时读取已保存配置
 	tryDedicated(npmDedicated, settingService.GetNpmEnabled(), settingService.GetNpmAddr())
 	tryDedicated(fileDedicated, settingService.GetFileEnabled(), settingService.GetFileAddr())
+	tryDedicated(goDedicated, settingService.GetGoEnabled(), settingService.GetGoAddr())
 
 	// 监听配置变更，动态热重启独立端口
 	settingService.OnChange(service.SettingNpmEnabled, func(_ string) {
@@ -129,6 +141,12 @@ func run(cfg *config.Config) error {
 	settingService.OnChange(service.SettingFileAddr, func(_ string) {
 		tryDedicated(fileDedicated, settingService.GetFileEnabled(), settingService.GetFileAddr())
 	})
+	settingService.OnChange(service.SettingGoEnabled, func(_ string) {
+		tryDedicated(goDedicated, settingService.GetGoEnabled(), settingService.GetGoAddr())
+	})
+	settingService.OnChange(service.SettingGoAddr, func(_ string) {
+		tryDedicated(goDedicated, settingService.GetGoEnabled(), settingService.GetGoAddr())
+	})
 
 	// ── 主端口 ────────────────────────────────────────────────────────────────
 
@@ -139,7 +157,7 @@ func run(cfg *config.Config) error {
 		appConfig.NotFoundHandler = spaHandler
 	}
 	app := ursa.New(appConfig)
-	router.Setup(app)
+	router.Setup(app, goHandler)
 
 	log.Printf("data dir : %s", cfg.Data)
 	log.Printf("database : %s", cfg.Database.DSN)

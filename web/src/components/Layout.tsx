@@ -10,6 +10,7 @@ import FolderIcon from '@mui/icons-material/Folder'
 import LogoutIcon from '@mui/icons-material/Logout'
 import LockIcon from '@mui/icons-material/Lock'
 import ViewModuleIcon from '@mui/icons-material/ViewModule'
+import StorageIcon from '@mui/icons-material/Storage'
 import SettingsIcon from '@mui/icons-material/Settings'
 import { useAuth } from '../store/auth'
 import { authApi } from '../api'
@@ -19,6 +20,7 @@ const DRAWER_WIDTH = 200
 const navItems = [
   { label: 'File Store', path: '/files', icon: <FolderIcon /> },
   { label: 'npm', path: '/npm', icon: <ViewModuleIcon /> },
+  { label: 'Go Modules', path: '/go', icon: <StorageIcon /> },
   { label: 'Users', path: '/users', icon: <PeopleIcon /> },
   { label: 'Settings', path: '/settings', icon: <SettingsIcon /> },
 ]

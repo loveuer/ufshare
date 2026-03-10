@@ -16,10 +16,11 @@ const (
 
 type Config struct {
 	Debug    bool
-	Address  string        // 监听地址，如 0.0.0.0:8000
+	Address  string        // 监听地址，如 0.0.0.0:9817
 	Data     string        // 数据目录，存放上传文件和数据库
 	NpmAddr  string        // npm 专用端口，如 0.0.0.0:4873（可选）
 	FileAddr string        // file-store 专用端口，如 0.0.0.0:8001（可选）
+	GoAddr   string        // go 模块代理专用端口，如 0.0.0.0:8081（可选）
 	BodySize int64         // 请求体大小限制（字节），-1 表示不限制
 	Database DatabaseConfig
 	JWT      JWTConfig
