@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"log"
 	"sync"
 
@@ -28,7 +29,7 @@ const (
 type SettingService struct {
 	db        *gorm.DB
 	mu        sync.RWMutex
-	cache     map[string]string  // 内存缓存，避免热路径反复查 DB
+	cache     map[string]string // 内存缓存，避免热路径反复查 DB
 	listeners map[string][]func(string)
 }
 
@@ -84,8 +85,8 @@ func (s *SettingService) Get(key string) string {
 }
 
 // Set 写入配置项（upsert），同步更新缓存并通知观察者
-func (s *SettingService) Set(key, value string) error {
-	err := s.db.Clauses(clause.OnConflict{
+func (s *SettingService) Set(ctx context.Context, key, value string) error {
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
 	}).Create(&model.Setting{Key: key, Value: value}).Error
@@ -164,7 +165,7 @@ func (s *SettingService) GetGoAddr() string {
 }
 
 // GetAll 返回所有配置项（供设置页面展示，直接读 DB 保证数据最新）
-func (s *SettingService) GetAll() ([]model.Setting, error) {
+func (s *SettingService) GetAll(ctx context.Context) ([]model.Setting, error) {
 	var settings []model.Setting
-	return settings, s.db.Find(&settings).Error
+	return settings, s.db.WithContext(ctx).Find(&settings).Error
 }

@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -50,11 +51,12 @@ func newTestServer(t *testing.T) *testServer {
 	npmSvc := npmsvc.New(db, dataDir, settingSvc)
 
 	// 创建管理员用户
-	user, err := authSvc.Register(testAdminUser, testAdminPass, "admin@test.local")
+	bgCtx := context.Background()
+	user, err := authSvc.Register(bgCtx, testAdminUser, testAdminPass, "admin@test.local")
 	if err != nil {
 		t.Fatalf("register admin: %v", err)
 	}
-	if err := userSvc.SetAdmin(user.ID, true); err != nil {
+	if err := userSvc.SetAdmin(bgCtx, user.ID, true); err != nil {
 		t.Fatalf("set admin: %v", err)
 	}
 
@@ -87,7 +89,7 @@ func newTestServer(t *testing.T) *testServer {
 	}
 
 	// 获取 token
-	token, _, err := authSvc.Login(testAdminUser, testAdminPass)
+	token, _, err := authSvc.Login(bgCtx, testAdminUser, testAdminPass)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

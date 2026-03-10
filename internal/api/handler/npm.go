@@ -37,7 +37,7 @@ func (h *NpmHandler) ListPackages(c *ursa.Ctx) error {
 	}
 	search := c.Query("search")
 
-	list, total, err := h.npm.ListPackages(page, pageSize, search)
+	list, total, err := h.npm.ListPackages(c.Request.Context(), page, pageSize, search)
 	if err != nil {
 		return c.Status(500).JSON(ursa.Map{"code": 500, "message": err.Error()})
 	}
@@ -57,7 +57,7 @@ func (h *NpmHandler) ListVersions(c *ursa.Ctx) error {
 	if scope := c.Query("scope"); scope != "" {
 		name = "@" + scope + "/" + name
 	}
-	versions, err := h.npm.ListVersions(name)
+	versions, err := h.npm.ListVersions(c.Request.Context(), name)
 	if err != nil {
 		if errors.Is(err, npmsvc.ErrPackageNotFound) {
 			return c.Status(404).JSON(ursa.Map{"code": 404, "message": "package not found"})
@@ -86,7 +86,7 @@ func (h *NpmHandler) Login(c *ursa.Ctx) error {
 		return c.Status(400).JSON(ursa.Map{"error": "invalid request body"})
 	}
 
-	token, user, err := h.auth.Login(body.Name, body.Password)
+	token, user, err := h.auth.Login(c.Request.Context(), body.Name, body.Password)
 	if err != nil {
 		return c.Status(401).JSON(ursa.Map{"error": "unauthorized"})
 	}
@@ -113,7 +113,7 @@ func (h *NpmHandler) GetPackument(c *ursa.Ctx) error {
 	baseURL := resolveBaseURL(c)
 	abbreviated := strings.Contains(c.Request.Header.Get("Accept"), "vnd.npm.install-v1+json")
 
-	pack, err := h.npm.GetPackument(name, baseURL, abbreviated)
+	pack, err := h.npm.GetPackument(c.Request.Context(), name, baseURL, abbreviated)
 	if err != nil {
 		if errors.Is(err, npmsvc.ErrPackageNotFound) {
 			return c.Status(404).JSON(ursa.Map{"error": "package not found"})
@@ -132,7 +132,7 @@ func (h *NpmHandler) GetVersion(c *ursa.Ctx) error {
 	name := resolvePkgName(c)
 	version := c.Param("version")
 
-	meta, err := h.npm.GetVersion(name, version)
+	meta, err := h.npm.GetVersion(c.Request.Context(), name, version)
 	if err != nil {
 		if errors.Is(err, npmsvc.ErrPackageNotFound) || errors.Is(err, npmsvc.ErrVersionNotFound) {
 			return c.Status(404).JSON(ursa.Map{"error": "version not found"})
@@ -154,7 +154,7 @@ func (h *NpmHandler) GetTarball(c *ursa.Ctx) error {
 	filename := c.Param("file")
 
 	c.Set("Content-Type", "application/octet-stream")
-	if err := h.npm.ServeTarball(name, filename, c.Writer); err != nil {
+	if err := h.npm.ServeTarball(c.Request.Context(), name, filename, c.Writer); err != nil {
 		if errors.Is(err, npmsvc.ErrTarballNotFound) {
 			return c.Status(404).JSON(ursa.Map{"error": "tarball not found"})
 		}
@@ -176,7 +176,7 @@ func (h *NpmHandler) Publish(c *ursa.Ctx) error {
 	uploaderID := middleware.GetUserID(c)
 	uploaderName := middleware.GetUsername(c)
 
-	if err := h.npm.Publish(&body, uploaderID, uploaderName); err != nil {
+	if err := h.npm.Publish(c.Request.Context(), &body, uploaderID, uploaderName); err != nil {
 		if errors.Is(err, npmsvc.ErrVersionExists) {
 			return c.Status(409).JSON(ursa.Map{"error": err.Error()})
 		}

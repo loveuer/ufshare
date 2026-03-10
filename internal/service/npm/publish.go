@@ -1,6 +1,7 @@
 package npm
 
 import (
+	"context"
 	"crypto/sha1" //nolint:gosec // npm uses sha1 for shasum
 	"encoding/base64"
 	"errors"
@@ -29,7 +30,7 @@ type preparedVersion struct {
 //  1. 事务外：解码 tarball 并写入临时文件（磁盘操作独立于事务）
 //  2. DB 事务：仅做数据库操作，事务失败时 defer 清理所有临时文件
 //  3. 事务成功后：原子 rename 临时文件到最终路径
-func (s *Service) Publish(body *PublishBody, uploaderID uint, uploaderName string) error {
+func (s *Service) Publish(ctx context.Context, body *PublishBody, uploaderID uint, uploaderName string) error {
 	var prepared []preparedVersion
 
 	// defer 保证：无论函数以何种方式退出，都清理所有未 rename 的临时文件
@@ -81,7 +82,7 @@ func (s *Service) Publish(body *PublishBody, uploaderID uint, uploaderName strin
 
 	// 2. DB 事务：仅做数据库操作，不碰磁盘
 	// 若事务失败，defer 负责清理所有临时文件
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		pkg, err := s.upsertPackageWith(tx, body.Name, body.Description, body.Readme, body.DistTags)
 		if err != nil {
 			return fmt.Errorf("upsert package: %w", err)

@@ -1,6 +1,7 @@
 package npm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,11 +27,11 @@ var (
 
 // Service npm 仓库服务，负责本地发布、代理缓存、元数据管理
 type Service struct {
-	db          *gorm.DB
-	dataDir     string           // {data}/npm
-	settingSvc  *service.SettingService
-	httpClient  *http.Client
-	sfGroup     singleflight.Group // 防止并发重复代理同一包
+	db         *gorm.DB
+	dataDir    string           // {data}/npm
+	settingSvc *service.SettingService
+	httpClient *http.Client
+	sfGroup    singleflight.Group // 防止并发重复代理同一包
 }
 
 func New(db *gorm.DB, dataDir string, settingSvc *service.SettingService) *Service {
@@ -158,9 +159,9 @@ func sanitizePkgName(name string) string {
 
 // ── 从 DB 构建 Packument ──────────────────────────────────────────────────────
 
-func (s *Service) buildPackumentFromDB(name, baseURL string, abbreviated bool) (*Packument, error) {
+func (s *Service) buildPackumentFromDB(ctx context.Context, name, baseURL string, abbreviated bool) (*Packument, error) {
 	var pkg model.NpmPackage
-	if err := s.db.Where("name = ?", name).First(&pkg).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("name = ?", name).First(&pkg).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPackageNotFound
 		}
@@ -168,7 +169,7 @@ func (s *Service) buildPackumentFromDB(name, baseURL string, abbreviated bool) (
 	}
 
 	var versions []model.NpmVersion
-	if err := s.db.Where("package_id = ?", pkg.ID).Find(&versions).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("package_id = ?", pkg.ID).Find(&versions).Error; err != nil {
 		return nil, err
 	}
 	if len(versions) == 0 {
@@ -204,10 +205,11 @@ func (s *Service) buildPackumentFromDB(name, baseURL string, abbreviated bool) (
 }
 
 // upsertPackage 创建或更新 NpmPackage 记录，返回最新的 pkg
-func (s *Service) upsertPackage(name, description, readme string, distTags map[string]string) (model.NpmPackage, error) {
-	return s.upsertPackageWith(s.db, name, description, readme, distTags)
+func (s *Service) upsertPackage(ctx context.Context, name, description, readme string, distTags map[string]string) (model.NpmPackage, error) {
+	return s.upsertPackageWith(s.db.WithContext(ctx), name, description, readme, distTags)
 }
 
+// upsertPackageWith 使用指定的 db 实例（可为事务 tx）执行 upsert
 func (s *Service) upsertPackageWith(db *gorm.DB, name, description, readme string, distTags map[string]string) (model.NpmPackage, error) {
 	distTagsJSON, _ := json.Marshal(distTags)
 

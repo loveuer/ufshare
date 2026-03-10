@@ -45,7 +45,7 @@ func resolveAuth(c *ursa.Ctx, authService *service.AuthService) (ok bool, err er
 		if len(parts) != 2 {
 			return false, service.ErrInvalidCredentials
 		}
-		user, e := authService.VerifyCredentials(parts[0], parts[1])
+		user, e := authService.VerifyCredentials(c.Request.Context(), parts[0], parts[1])
 		if e != nil {
 			return false, e
 		}

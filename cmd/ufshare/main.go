@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -101,17 +102,18 @@ func run(cfg *config.Config) error {
 	})
 
 	// CLI flag 显式指定时强制覆盖 DB 中的值，保证每次启动 flag 均生效
+	bgCtx := context.Background()
 	if cfg.NpmAddr != "" {
-		_ = settingService.Set(service.SettingNpmAddr, cfg.NpmAddr)
-		_ = settingService.Set(service.SettingNpmEnabled, "true")
+		_ = settingService.Set(bgCtx, service.SettingNpmAddr, cfg.NpmAddr)
+		_ = settingService.Set(bgCtx, service.SettingNpmEnabled, "true")
 	}
 	if cfg.FileAddr != "" {
-		_ = settingService.Set(service.SettingFileAddr, cfg.FileAddr)
-		_ = settingService.Set(service.SettingFileEnabled, "true")
+		_ = settingService.Set(bgCtx, service.SettingFileAddr, cfg.FileAddr)
+		_ = settingService.Set(bgCtx, service.SettingFileEnabled, "true")
 	}
 	if cfg.GoAddr != "" {
-		_ = settingService.Set(service.SettingGoAddr, cfg.GoAddr)
-		_ = settingService.Set(service.SettingGoEnabled, "true")
+		_ = settingService.Set(bgCtx, service.SettingGoAddr, cfg.GoAddr)
+		_ = settingService.Set(bgCtx, service.SettingGoEnabled, "true")
 	}
 
 	// tryDedicated 根据 enabled + addr 决定启动/停止独立端口
@@ -186,7 +188,8 @@ func formatBodySize(n int64) string {
 }
 
 func createDefaultAdmin(authService *service.AuthService, userService *service.UserService) error {
-	user, err := authService.Register("admin", "admin123", "admin@ufshare.local")
+	ctx := context.Background()
+	user, err := authService.Register(ctx, "admin", "admin123", "admin@ufshare.local")
 	if err != nil {
 		if err == service.ErrUserExists {
 			return nil
@@ -194,7 +197,7 @@ func createDefaultAdmin(authService *service.AuthService, userService *service.U
 		return err
 	}
 
-	if err := userService.SetAdmin(user.ID, true); err != nil {
+	if err := userService.SetAdmin(ctx, user.ID, true); err != nil {
 		return err
 	}
 

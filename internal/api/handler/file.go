@@ -25,7 +25,7 @@ func (h *FileHandler) Upload(c *ursa.Ctx) error {
 	uploaderID := middleware.GetUserID(c)
 	uploaderName := middleware.GetUsername(c)
 
-	entry, err := h.fileService.Upload(filePath, c.Request.Body, uploaderID, uploaderName)
+	entry, err := h.fileService.Upload(c.Request.Context(), filePath, c.Request.Body, uploaderID, uploaderName)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidPath) {
 			return c.Status(400).JSON(ursa.Map{"code": 400, "message": "invalid path"})
@@ -40,7 +40,7 @@ func (h *FileHandler) Upload(c *ursa.Ctx) error {
 func (h *FileHandler) Download(c *ursa.Ctx) error {
 	filePath := c.Param("path")
 
-	entry, diskPath, err := h.fileService.Download(filePath)
+	entry, diskPath, err := h.fileService.Download(c.Request.Context(), filePath)
 	if err != nil {
 		if errors.Is(err, service.ErrFileNotFound) {
 			return c.Status(404).JSON(ursa.Map{"code": 404, "message": "file not found"})
@@ -62,7 +62,7 @@ func (h *FileHandler) Download(c *ursa.Ctx) error {
 func (h *FileHandler) Delete(c *ursa.Ctx) error {
 	filePath := c.Param("path")
 
-	if err := h.fileService.Delete(filePath); err != nil {
+	if err := h.fileService.Delete(c.Request.Context(), filePath); err != nil {
 		if errors.Is(err, service.ErrFileNotFound) {
 			return c.Status(404).JSON(ursa.Map{"code": 404, "message": "file not found"})
 		}
@@ -79,7 +79,7 @@ func (h *FileHandler) Delete(c *ursa.Ctx) error {
 func (h *FileHandler) List(c *ursa.Ctx) error {
 	prefix := c.Query("prefix")
 
-	entries, err := h.fileService.List(prefix)
+	entries, err := h.fileService.List(c.Request.Context(), prefix)
 	if err != nil {
 		return c.Status(500).JSON(ursa.Map{"code": 500, "message": "internal server error"})
 	}

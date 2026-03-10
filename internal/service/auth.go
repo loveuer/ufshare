@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -58,10 +59,10 @@ type Claims struct {
 }
 
 // Register 用户注册
-func (s *AuthService) Register(username, password, email string) (*model.User, error) {
+func (s *AuthService) Register(ctx context.Context, username, password, email string) (*model.User, error) {
 	// 检查用户是否已存在
 	var existing model.User
-	if err := s.db.Where("username = ?", username).First(&existing).Error; err == nil {
+	if err := s.db.WithContext(ctx).Where("username = ?", username).First(&existing).Error; err == nil {
 		return nil, ErrUserExists
 	}
 
@@ -77,7 +78,7 @@ func (s *AuthService) Register(username, password, email string) (*model.User, e
 		Status:   1,
 	}
 
-	if err := s.db.Create(user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Create(user).Error; err != nil {
 		return nil, err
 	}
 
@@ -85,9 +86,9 @@ func (s *AuthService) Register(username, password, email string) (*model.User, e
 }
 
 // Login 用户登录
-func (s *AuthService) Login(username, password string) (string, *model.User, error) {
+func (s *AuthService) Login(ctx context.Context, username, password string) (string, *model.User, error) {
 	var user model.User
-	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("username = ?", username).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", nil, ErrUserNotFound
 		}
@@ -111,7 +112,7 @@ func (s *AuthService) Login(username, password string) (string, *model.User, err
 	return token, &user, nil
 }
 
-// ValidateToken 验证 JWT token
+// ValidateToken 验证 JWT token（纯计算，无 DB 访问，不需要 ctx）
 func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -131,9 +132,9 @@ func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 }
 
 // GetUserByID 根据 ID 获取用户
-func (s *AuthService) GetUserByID(id uint) (*model.User, error) {
+func (s *AuthService) GetUserByID(ctx context.Context, id uint) (*model.User, error) {
 	var user model.User
-	if err := s.db.First(&user, id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&user, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -143,9 +144,9 @@ func (s *AuthService) GetUserByID(id uint) (*model.User, error) {
 }
 
 // VerifyCredentials 校验用户名密码，成功返回用户对象（不生成 token）
-func (s *AuthService) VerifyCredentials(username, password string) (*model.User, error) {
+func (s *AuthService) VerifyCredentials(ctx context.Context, username, password string) (*model.User, error) {
 	var user model.User
-	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("username = ?", username).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
 		}
@@ -164,9 +165,9 @@ func (s *AuthService) VerifyCredentials(username, password string) (*model.User,
 }
 
 // ChangePassword 自助修改密码，需验证旧密码
-func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword string) error {
+func (s *AuthService) ChangePassword(ctx context.Context, userID uint, oldPassword, newPassword string) error {
 	var user model.User
-	if err := s.db.First(&user, userID).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&user, userID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrUserNotFound
 		}
@@ -182,7 +183,7 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 		return err
 	}
 
-	return s.db.Model(&user).Update("password", hashed).Error
+	return s.db.WithContext(ctx).Model(&user).Update("password", hashed).Error
 }
 
 func (s *AuthService) generateToken(user *model.User) (string, error) {

@@ -43,7 +43,7 @@ func (h *AuthHandler) Register(c *ursa.Ctx) error {
 		})
 	}
 
-	user, err := h.authService.Register(req.Username, req.Password, req.Email)
+	user, err := h.authService.Register(c.Request.Context(), req.Username, req.Password, req.Email)
 	if err != nil {
 		if err == service.ErrUserExists {
 			return c.Status(409).JSON(ursa.Map{
@@ -81,7 +81,7 @@ func (h *AuthHandler) Login(c *ursa.Ctx) error {
 		})
 	}
 
-	token, user, err := h.authService.Login(req.Username, req.Password)
+	token, user, err := h.authService.Login(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
 		switch err {
 		case service.ErrUserNotFound, service.ErrInvalidCredentials:
@@ -129,7 +129,7 @@ func (h *AuthHandler) ChangePassword(c *ursa.Ctx) error {
 	}
 
 	userID := middleware.GetUserID(c)
-	if err := h.authService.ChangePassword(userID, req.OldPassword, req.NewPassword); err != nil {
+	if err := h.authService.ChangePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
 		if err == service.ErrInvalidCredentials {
 			return c.Status(400).JSON(ursa.Map{"code": 400, "message": "old password is incorrect"})
 		}
@@ -141,7 +141,7 @@ func (h *AuthHandler) ChangePassword(c *ursa.Ctx) error {
 
 func (h *AuthHandler) Me(c *ursa.Ctx) error {
 	userID := middleware.GetUserID(c)
-	user, err := h.authService.GetUserByID(userID)
+	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
 		return c.Status(404).JSON(ursa.Map{
 			"code":    404,

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -36,15 +37,15 @@ func NewFileService(db *gorm.DB, dataDir string) *FileService {
 // Upload 上传文件，filePath 为相对路径如 v1.0/app.tar.gz
 // 每次使用带时间戳的唯一临时文件名，不同路径并发无竞争，
 // 同一路径并发时各自写各自的 tmp 后 rename，幂等（last-write-wins）
-func (s *FileService) Upload(filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
+func (s *FileService) Upload(ctx context.Context, filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return nil, err
 	}
-	return s.doUpload(filePath, src, uploaderID, uploaderName)
+	return s.doUpload(ctx, filePath, src, uploaderID, uploaderName)
 }
 
-func (s *FileService) doUpload(filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
+func (s *FileService) doUpload(ctx context.Context, filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
 	diskPath := filepath.Join(s.dataDir, filePath)
 	if err := os.MkdirAll(filepath.Dir(diskPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
@@ -77,7 +78,7 @@ func (s *FileService) doUpload(filePath string, src io.Reader, uploaderID uint, 
 	}
 
 	var entry model.FileEntry
-	err = s.db.Where("path = ?", filePath).First(&entry).Error
+	err = s.db.WithContext(ctx).Where("path = ?", filePath).First(&entry).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
@@ -90,9 +91,9 @@ func (s *FileService) doUpload(filePath string, src io.Reader, uploaderID uint, 
 	entry.Uploader = uploaderName
 
 	if entry.ID == 0 {
-		err = s.db.Create(&entry).Error
+		err = s.db.WithContext(ctx).Create(&entry).Error
 	} else {
-		err = s.db.Save(&entry).Error
+		err = s.db.WithContext(ctx).Save(&entry).Error
 	}
 	if err != nil {
 		return nil, err
@@ -102,14 +103,14 @@ func (s *FileService) doUpload(filePath string, src io.Reader, uploaderID uint, 
 }
 
 // Download 返回元数据和磁盘路径
-func (s *FileService) Download(filePath string) (*model.FileEntry, string, error) {
+func (s *FileService) Download(ctx context.Context, filePath string) (*model.FileEntry, string, error) {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return nil, "", err
 	}
 
 	var entry model.FileEntry
-	if err := s.db.Where("path = ?", filePath).First(&entry).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("path = ?", filePath).First(&entry).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, "", ErrFileNotFound
 		}
@@ -125,14 +126,14 @@ func (s *FileService) Download(filePath string) (*model.FileEntry, string, error
 }
 
 // Delete 删除文件
-func (s *FileService) Delete(filePath string) error {
+func (s *FileService) Delete(ctx context.Context, filePath string) error {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return err
 	}
 
 	var entry model.FileEntry
-	if err := s.db.Where("path = ?", filePath).First(&entry).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("path = ?", filePath).First(&entry).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrFileNotFound
 		}
@@ -140,12 +141,12 @@ func (s *FileService) Delete(filePath string) error {
 	}
 
 	_ = os.Remove(filepath.Join(s.dataDir, filePath))
-	return s.db.Delete(&entry).Error
+	return s.db.WithContext(ctx).Delete(&entry).Error
 }
 
 // List 列出文件，可按前缀过滤
-func (s *FileService) List(prefix string) ([]model.FileEntry, error) {
-	query := s.db.Model(&model.FileEntry{})
+func (s *FileService) List(ctx context.Context, prefix string) ([]model.FileEntry, error) {
+	query := s.db.WithContext(ctx).Model(&model.FileEntry{})
 	if prefix != "" {
 		query = query.Where("path LIKE ?", prefix+"%")
 	}

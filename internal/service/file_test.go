@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -48,7 +49,7 @@ func TestUpload_SimpleFile(t *testing.T) {
 	svc, dataDir := setupFileService(t)
 	content := []byte("hello ufshare")
 
-	entry, err := svc.Upload("hello.txt", bytes.NewReader(content), 1, "alice")
+	entry, err := svc.Upload(context.Background(), "hello.txt", bytes.NewReader(content), 1, "alice")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestUpload_LeadingSlash(t *testing.T) {
 	svc, _ := setupFileService(t)
 	content := []byte("leading slash test")
 
-	entry, err := svc.Upload("/leading.txt", bytes.NewReader(content), 1, "bob")
+	entry, err := svc.Upload(context.Background(), "/leading.txt", bytes.NewReader(content), 1, "bob")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestUpload_NestedPath(t *testing.T) {
 	svc, dataDir := setupFileService(t)
 	content := []byte("nested content")
 
-	entry, err := svc.Upload("v1.0/releases/app.tar.gz", bytes.NewReader(content), 1, "ci")
+	entry, err := svc.Upload(context.Background(), "v1.0/releases/app.tar.gz", bytes.NewReader(content), 1, "ci")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -112,13 +113,13 @@ func TestUpload_NestedPath(t *testing.T) {
 func TestUpload_Overwrite(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	_, err := svc.Upload("data.bin", bytes.NewReader([]byte("v1")), 1, "user")
+	_, err := svc.Upload(context.Background(), "data.bin", bytes.NewReader([]byte("v1")), 1, "user")
 	if err != nil {
 		t.Fatalf("first upload: %v", err)
 	}
 
 	newContent := []byte("v2-updated")
-	entry, err := svc.Upload("data.bin", bytes.NewReader(newContent), 2, "user2")
+	entry, err := svc.Upload(context.Background(), "data.bin", bytes.NewReader(newContent), 2, "user2")
 	if err != nil {
 		t.Fatalf("second upload: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestUpload_Overwrite(t *testing.T) {
 func TestUpload_EmptyPath(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	_, err := svc.Upload("", bytes.NewReader([]byte("x")), 1, "u")
+	_, err := svc.Upload(context.Background(), "", bytes.NewReader([]byte("x")), 1, "u")
 	if err == nil {
 		t.Fatal("expected ErrInvalidPath, got nil")
 	}
@@ -153,7 +154,7 @@ func TestUpload_PathTraversal(t *testing.T) {
 		"//etc/passwd", // 双斜杠：normalizePath 去掉一个后仍为绝对路径
 	}
 	for _, p := range mustFail {
-		_, err := svc.Upload(p, bytes.NewReader([]byte("x")), 1, "u")
+		_, err := svc.Upload(context.Background(), p, bytes.NewReader([]byte("x")), 1, "u")
 		if err != ErrInvalidPath {
 			t.Errorf("Upload(%q): expected ErrInvalidPath, got %v", p, err)
 		}
@@ -165,7 +166,7 @@ func TestUpload_AbsPathNormalized(t *testing.T) {
 	// 文件安全地存储在 dataDir/file-store/etc/passwd 内，不是路径穿越漏洞
 	svc, dataDir := setupFileService(t)
 
-	entry, err := svc.Upload("/etc/passwd", bytes.NewReader([]byte("test")), 1, "u")
+	entry, err := svc.Upload(context.Background(), "/etc/passwd", bytes.NewReader([]byte("test")), 1, "u")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestUpload_MimeType(t *testing.T) {
 		{"noext", "application/octet-stream"},
 	}
 	for _, tc := range cases {
-		entry, err := svc.Upload(tc.path, bytes.NewReader([]byte("data")), 1, "u")
+		entry, err := svc.Upload(context.Background(), tc.path, bytes.NewReader([]byte("data")), 1, "u")
 		if err != nil {
 			t.Fatalf("Upload(%q): %v", tc.path, err)
 		}
@@ -207,11 +208,11 @@ func TestDownload_Existing(t *testing.T) {
 	svc, _ := setupFileService(t)
 	content := []byte("download me")
 
-	if _, err := svc.Upload("dl.txt", bytes.NewReader(content), 1, "u"); err != nil {
+	if _, err := svc.Upload(context.Background(), "dl.txt", bytes.NewReader(content), 1, "u"); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
-	entry, diskPath, err := svc.Download("dl.txt")
+	entry, diskPath, err := svc.Download(context.Background(), "dl.txt")
 	if err != nil {
 		t.Fatalf("download: %v", err)
 	}
@@ -231,12 +232,12 @@ func TestDownload_LeadingSlash(t *testing.T) {
 	svc, _ := setupFileService(t)
 	content := []byte("leading slash download")
 
-	if _, err := svc.Upload("leaddown.txt", bytes.NewReader(content), 1, "u"); err != nil {
+	if _, err := svc.Upload(context.Background(), "leaddown.txt", bytes.NewReader(content), 1, "u"); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
 	// handler 传入的 path 带前导 /
-	entry, _, err := svc.Download("/leaddown.txt")
+	entry, _, err := svc.Download(context.Background(), "/leaddown.txt")
 	if err != nil {
 		t.Fatalf("download with leading slash: %v", err)
 	}
@@ -248,7 +249,7 @@ func TestDownload_LeadingSlash(t *testing.T) {
 func TestDownload_NotFound(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	_, _, err := svc.Download("ghost.txt")
+	_, _, err := svc.Download(context.Background(), "ghost.txt")
 	if err != ErrFileNotFound {
 		t.Errorf("expected ErrFileNotFound, got %v", err)
 	}
@@ -257,7 +258,7 @@ func TestDownload_NotFound(t *testing.T) {
 func TestDownload_EmptyPath(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	_, _, err := svc.Download("")
+	_, _, err := svc.Download(context.Background(), "")
 	if err != ErrInvalidPath {
 		t.Errorf("expected ErrInvalidPath, got %v", err)
 	}
@@ -266,7 +267,7 @@ func TestDownload_EmptyPath(t *testing.T) {
 func TestDownload_PathTraversal(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	_, _, err := svc.Download("../secret")
+	_, _, err := svc.Download(context.Background(), "../secret")
 	if err != ErrInvalidPath {
 		t.Errorf("expected ErrInvalidPath, got %v", err)
 	}
@@ -276,7 +277,7 @@ func TestDownload_DBExistsButDiskMissing(t *testing.T) {
 	svc, dataDir := setupFileService(t)
 	content := []byte("ghost disk")
 
-	if _, err := svc.Upload("orphan.txt", bytes.NewReader(content), 1, "u"); err != nil {
+	if _, err := svc.Upload(context.Background(), "orphan.txt", bytes.NewReader(content), 1, "u"); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
@@ -286,7 +287,7 @@ func TestDownload_DBExistsButDiskMissing(t *testing.T) {
 		t.Fatalf("remove: %v", err)
 	}
 
-	_, _, err := svc.Download("orphan.txt")
+	_, _, err := svc.Download(context.Background(), "orphan.txt")
 	if err != ErrFileNotFound {
 		t.Errorf("expected ErrFileNotFound, got %v", err)
 	}
@@ -297,16 +298,16 @@ func TestDownload_DBExistsButDiskMissing(t *testing.T) {
 func TestDelete_Existing(t *testing.T) {
 	svc, dataDir := setupFileService(t)
 
-	if _, err := svc.Upload("todel.bin", bytes.NewReader([]byte("bye")), 1, "u"); err != nil {
+	if _, err := svc.Upload(context.Background(), "todel.bin", bytes.NewReader([]byte("bye")), 1, "u"); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
-	if err := svc.Delete("todel.bin"); err != nil {
+	if err := svc.Delete(context.Background(), "todel.bin"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	// DB 记录应已删除
-	_, _, err := svc.Download("todel.bin")
+	_, _, err := svc.Download(context.Background(), "todel.bin")
 	if err != ErrFileNotFound {
 		t.Errorf("after delete, download expected ErrFileNotFound, got %v", err)
 	}
@@ -321,11 +322,11 @@ func TestDelete_Existing(t *testing.T) {
 func TestDelete_LeadingSlash(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	if _, err := svc.Upload("delslash.txt", bytes.NewReader([]byte("x")), 1, "u"); err != nil {
+	if _, err := svc.Upload(context.Background(), "delslash.txt", bytes.NewReader([]byte("x")), 1, "u"); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 
-	if err := svc.Delete("/delslash.txt"); err != nil {
+	if err := svc.Delete(context.Background(), "/delslash.txt"); err != nil {
 		t.Fatalf("delete with leading slash: %v", err)
 	}
 }
@@ -333,7 +334,7 @@ func TestDelete_LeadingSlash(t *testing.T) {
 func TestDelete_NotFound(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	err := svc.Delete("nonexistent.txt")
+	err := svc.Delete(context.Background(), "nonexistent.txt")
 	if err != ErrFileNotFound {
 		t.Errorf("expected ErrFileNotFound, got %v", err)
 	}
@@ -342,7 +343,7 @@ func TestDelete_NotFound(t *testing.T) {
 func TestDelete_EmptyPath(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	err := svc.Delete("")
+	err := svc.Delete(context.Background(), "")
 	if err != ErrInvalidPath {
 		t.Errorf("expected ErrInvalidPath, got %v", err)
 	}
@@ -353,7 +354,7 @@ func TestDelete_EmptyPath(t *testing.T) {
 func TestList_Empty(t *testing.T) {
 	svc, _ := setupFileService(t)
 
-	entries, err := svc.List("")
+	entries, err := svc.List(context.Background(), "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -367,12 +368,12 @@ func TestList_AllFiles(t *testing.T) {
 
 	files := []string{"a.txt", "b/c.txt", "d.bin"}
 	for _, f := range files {
-		if _, err := svc.Upload(f, bytes.NewReader([]byte("x")), 1, "u"); err != nil {
+		if _, err := svc.Upload(context.Background(), f, bytes.NewReader([]byte("x")), 1, "u"); err != nil {
 			t.Fatalf("upload %q: %v", f, err)
 		}
 	}
 
-	entries, err := svc.List("")
+	entries, err := svc.List(context.Background(), "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -386,12 +387,12 @@ func TestList_PrefixFilter(t *testing.T) {
 
 	uploads := []string{"v1/a.txt", "v1/b.txt", "v2/c.txt"}
 	for _, f := range uploads {
-		if _, err := svc.Upload(f, bytes.NewReader([]byte("x")), 1, "u"); err != nil {
+		if _, err := svc.Upload(context.Background(), f, bytes.NewReader([]byte("x")), 1, "u"); err != nil {
 			t.Fatalf("upload %q: %v", f, err)
 		}
 	}
 
-	entries, err := svc.List("v1/")
+	entries, err := svc.List(context.Background(), "v1/")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

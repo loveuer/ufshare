@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -27,7 +28,7 @@ func setupUserService(t *testing.T) (*UserService, *AuthService) {
 // 创建普通用户并返回其 ID
 func createNormalUser(t *testing.T, svc *UserService, username string) uint {
 	t.Helper()
-	u, err := svc.CreateUser(username, "password123", username+"@test.com", false)
+	u, err := svc.CreateUser(context.Background(), username, "password123", username+"@test.com", false)
 	if err != nil {
 		t.Fatalf("createNormalUser(%q): %v", username, err)
 	}
@@ -37,7 +38,7 @@ func createNormalUser(t *testing.T, svc *UserService, username string) uint {
 // 创建管理员用户并返回其 ID
 func createAdminUser(t *testing.T, svc *UserService, username string) uint {
 	t.Helper()
-	u, err := svc.CreateUser(username, "password123", username+"@test.com", true)
+	u, err := svc.CreateUser(context.Background(), username, "password123", username+"@test.com", true)
 	if err != nil {
 		t.Fatalf("createAdminUser(%q): %v", username, err)
 	}
@@ -51,12 +52,12 @@ func TestDeleteUser_Normal(t *testing.T) {
 	adminID := createAdminUser(t, svc, "admin")
 	userID := createNormalUser(t, svc, "alice")
 
-	if err := svc.DeleteUser(adminID, userID); err != nil {
+	if err := svc.DeleteUser(context.Background(), adminID, userID); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
 
 	// 确认用户已被删除
-	if _, err := svc.GetUser(userID); err != ErrUserNotFound {
+	if _, err := svc.GetUser(context.Background(), userID); err != ErrUserNotFound {
 		t.Errorf("expected ErrUserNotFound after delete, got: %v", err)
 	}
 }
@@ -65,7 +66,7 @@ func TestDeleteUser_CannotDeleteSelf(t *testing.T) {
 	svc, _ := setupUserService(t)
 	adminID := createAdminUser(t, svc, "admin")
 
-	err := svc.DeleteUser(adminID, adminID)
+	err := svc.DeleteUser(context.Background(), adminID, adminID)
 	if err != ErrCannotDeleteSelf {
 		t.Errorf("expected ErrCannotDeleteSelf, got: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestDeleteUser_CannotDeleteAdmin(t *testing.T) {
 	adminID := createAdminUser(t, svc, "admin")
 	otherAdminID := createAdminUser(t, svc, "admin2")
 
-	err := svc.DeleteUser(adminID, otherAdminID)
+	err := svc.DeleteUser(context.Background(), adminID, otherAdminID)
 	if err != ErrCannotDeleteAdmin {
 		t.Errorf("expected ErrCannotDeleteAdmin, got: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestDeleteUser_CannotDeleteSoleAdmin(t *testing.T) {
 	svc, _ := setupUserService(t)
 	adminID := createAdminUser(t, svc, "admin")
 
-	err := svc.DeleteUser(adminID, adminID)
+	err := svc.DeleteUser(context.Background(), adminID, adminID)
 	if err != ErrCannotDeleteSelf {
 		t.Errorf("expected ErrCannotDeleteSelf, got: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestDeleteUser_NotFound(t *testing.T) {
 	svc, _ := setupUserService(t)
 	adminID := createAdminUser(t, svc, "admin")
 
-	err := svc.DeleteUser(adminID, 99999)
+	err := svc.DeleteUser(context.Background(), adminID, 99999)
 	if err != ErrUserNotFound {
 		t.Errorf("expected ErrUserNotFound, got: %v", err)
 	}
@@ -110,17 +111,17 @@ func TestDeleteUser_AdminCanDeleteNonAdmin(t *testing.T) {
 	u1 := createNormalUser(t, svc, "bob")
 	u2 := createNormalUser(t, svc, "carol")
 
-	if err := svc.DeleteUser(adminID, u1); err != nil {
+	if err := svc.DeleteUser(context.Background(), adminID, u1); err != nil {
 		t.Errorf("delete bob: %v", err)
 	}
-	if err := svc.DeleteUser(adminID, u2); err != nil {
+	if err := svc.DeleteUser(context.Background(), adminID, u2); err != nil {
 		t.Errorf("delete carol: %v", err)
 	}
 
-	if _, err := svc.GetUser(u1); err != ErrUserNotFound {
+	if _, err := svc.GetUser(context.Background(), u1); err != ErrUserNotFound {
 		t.Errorf("bob should be deleted")
 	}
-	if _, err := svc.GetUser(u2); err != ErrUserNotFound {
+	if _, err := svc.GetUser(context.Background(), u2); err != ErrUserNotFound {
 		t.Errorf("carol should be deleted")
 	}
 }
@@ -132,12 +133,12 @@ func TestDeleteUser_AdminCanBeDeletedAfterRevoke(t *testing.T) {
 	targetID := createAdminUser(t, svc, "admin2")
 
 	// 撤销 admin2 的管理员权限
-	if err := svc.SetAdmin(targetID, false); err != nil {
+	if err := svc.SetAdmin(context.Background(), targetID, false); err != nil {
 		t.Fatalf("revoke admin: %v", err)
 	}
 
 	// 现在可以删除
-	if err := svc.DeleteUser(adminID, targetID); err != nil {
+	if err := svc.DeleteUser(context.Background(), adminID, targetID); err != nil {
 		t.Errorf("expected success after revoke, got: %v", err)
 	}
 }

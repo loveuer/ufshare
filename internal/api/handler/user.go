@@ -41,7 +41,7 @@ func (h *UserHandler) Create(c *ursa.Ctx) error {
 		})
 	}
 
-	user, err := h.userService.CreateUser(req.Username, req.Password, req.Email, req.IsAdmin)
+	user, err := h.userService.CreateUser(c.Request.Context(), req.Username, req.Password, req.Email, req.IsAdmin)
 	if err != nil {
 		return c.Status(500).JSON(ursa.Map{
 			"code":    500,
@@ -68,7 +68,7 @@ func (h *UserHandler) List(c *ursa.Ctx) error {
 		pageSize = 20
 	}
 
-	users, total, err := h.userService.ListUsers(page, pageSize)
+	users, total, err := h.userService.ListUsers(c.Request.Context(), page, pageSize)
 	if err != nil {
 		return c.Status(500).JSON(ursa.Map{
 			"code":    500,
@@ -97,7 +97,7 @@ func (h *UserHandler) Get(c *ursa.Ctx) error {
 		})
 	}
 
-	user, err := h.userService.GetUser(uint(id))
+	user, err := h.userService.GetUser(c.Request.Context(), uint(id))
 	if err != nil {
 		if err == service.ErrUserNotFound {
 			return c.Status(404).JSON(ursa.Map{
@@ -164,7 +164,7 @@ func (h *UserHandler) Update(c *ursa.Ctx) error {
 		})
 	}
 
-	if err := h.userService.UpdateUser(uint(id), updates); err != nil {
+	if err := h.userService.UpdateUser(c.Request.Context(), uint(id), updates); err != nil {
 		return c.Status(500).JSON(ursa.Map{
 			"code":    500,
 			"message": "internal server error",
@@ -194,7 +194,7 @@ func (h *UserHandler) ResetPassword(c *ursa.Ctx) error {
 		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "password must be at least 6 characters"})
 	}
 
-	if err := h.userService.ResetPassword(uint(id), req.Password); err != nil {
+	if err := h.userService.ResetPassword(c.Request.Context(), uint(id), req.Password); err != nil {
 		if err == service.ErrUserNotFound {
 			return c.Status(404).JSON(ursa.Map{"code": 404, "message": "user not found"})
 		}
@@ -214,7 +214,7 @@ func (h *UserHandler) Delete(c *ursa.Ctx) error {
 	}
 
 	callerID := middleware.GetUserID(c)
-	if err := h.userService.DeleteUser(callerID, uint(id)); err != nil {
+	if err := h.userService.DeleteUser(c.Request.Context(), callerID, uint(id)); err != nil {
 		switch err {
 		case service.ErrCannotDeleteSelf:
 			return c.Status(400).JSON(ursa.Map{"code": 400, "message": "cannot delete yourself"})

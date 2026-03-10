@@ -1,10 +1,12 @@
 package npm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,13 +18,13 @@ import (
 
 // proxyAndCachePackument 从上游拉取 packument，持久化到 DB，返回带本地 URL 的 packument。
 // 内部通过 singleflight 合并同名包的并发请求，避免 SQLite 并发写冲突。
-func (s *Service) proxyAndCachePackument(name, baseURL string) (*Packument, error) {
+func (s *Service) proxyAndCachePackument(ctx context.Context, name, baseURL string) (*Packument, error) {
 	// singleflight：只有一个 goroutine 真正去上游拉取并写 DB
 	type sfResult struct {
 		err error
 	}
 	v, _, _ := s.sfGroup.Do("packument:"+name, func() (interface{}, error) {
-		return &sfResult{err: s.fetchAndSavePackument(name)}, nil
+		return &sfResult{err: s.fetchAndSavePackument(ctx, name)}, nil
 	})
 	if res := v.(*sfResult); res.err != nil {
 		// 如果是 404，返回 ErrPackageNotFound
@@ -33,13 +35,17 @@ func (s *Service) proxyAndCachePackument(name, baseURL string) (*Packument, erro
 	}
 
 	// 从 DB 构建带本地 URL 的 packument（每个调用者用各自的 baseURL）
-	return s.buildPackumentFromDB(name, baseURL, false)
+	return s.buildPackumentFromDB(ctx, name, baseURL, false)
 }
 
 // fetchAndSavePackument 从上游拉取 packument 并写入 DB（不含 baseURL 改写）
-func (s *Service) fetchAndSavePackument(name string) error {
+func (s *Service) fetchAndSavePackument(ctx context.Context, name string) error {
 	upstreamURL := fmt.Sprintf("%s/%s", s.upstream(), name)
-	resp, err := s.httpClient.Get(upstreamURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("upstream unreachable: %w", err)
 	}
@@ -68,14 +74,14 @@ func (s *Service) fetchAndSavePackument(name string) error {
 		return fmt.Errorf("parse upstream packument: %w", err)
 	}
 
-	pkg, err := s.upsertPackage(upstream.Name, upstream.Description, upstream.Readme, upstream.DistTags)
+	pkg, err := s.upsertPackage(ctx, upstream.Name, upstream.Description, upstream.Readme, upstream.DistTags)
 	if err != nil {
 		return fmt.Errorf("cache package metadata: %w", err)
 	}
 
 	// 一次查出已存在的版本号，避免逐条 SELECT
 	var existingVersions []string
-	s.db.Model(&model.NpmVersion{}).
+	s.db.WithContext(ctx).Model(&model.NpmVersion{}).
 		Where("package_id = ?", pkg.ID).
 		Pluck("version", &existingVersions)
 	existingSet := make(map[string]struct{}, len(existingVersions))
@@ -101,17 +107,17 @@ func (s *Service) fetchAndSavePackument(name string) error {
 		})
 	}
 	if len(newVersions) > 0 {
-		s.db.CreateInBatches(newVersions, 100) //nolint:errcheck
+		s.db.WithContext(ctx).CreateInBatches(newVersions, 100) //nolint:errcheck
 	}
 	return nil
 }
 
 // resolveTarballURL 从 DB 查找 tarball 的上游 URL。
 // 若 DB 中无记录，则先拉取 packument 填充，再重查。
-func (s *Service) resolveTarballURL(pkgName, filename string) (string, model.NpmVersion, error) {
+func (s *Service) resolveTarballURL(ctx context.Context, pkgName, filename string) (string, model.NpmVersion, error) {
 	var ver model.NpmVersion
 	query := func() error {
-		return s.db.
+		return s.db.WithContext(ctx).
 			Joins("JOIN npm_packages ON npm_packages.id = npm_versions.package_id").
 			Where("npm_packages.name = ? AND npm_versions.tarball_name = ?", pkgName, filename).
 			First(&ver).Error
@@ -119,7 +125,7 @@ func (s *Service) resolveTarballURL(pkgName, filename string) (string, model.Npm
 
 	if err := query(); errors.Is(err, gorm.ErrRecordNotFound) {
 		// DB 中无记录 → 先缓存 packument
-		if proxyErr := s.fetchAndSavePackument(pkgName); proxyErr != nil {
+		if proxyErr := s.fetchAndSavePackument(ctx, pkgName); proxyErr != nil {
 			return "", ver, ErrTarballNotFound
 		}
 		if err2 := query(); err2 != nil {
@@ -143,8 +149,12 @@ func (s *Service) resolveTarballURL(pkgName, filename string) (string, model.Npm
 //
 // 多个并发请求同一 tarball 各自独立流式下载（使用唯一 tmp 文件名），
 // 最后一个 rename 覆盖前一个（内容相同，幂等）。
-func (s *Service) streamAndCacheTarball(pkgName string, ver model.NpmVersion, upstreamURL, diskPath string, w io.Writer) error {
-	resp, err := s.httpClient.Get(upstreamURL)
+func (s *Service) streamAndCacheTarball(ctx context.Context, pkgName string, ver model.NpmVersion, upstreamURL, diskPath string, w io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("upstream unreachable: %w", err)
 	}
@@ -173,7 +183,7 @@ func (s *Service) streamAndCacheTarball(pkgName string, ver model.NpmVersion, up
 		if copyErr == nil {
 			if renameErr := os.Rename(tmp, diskPath); renameErr == nil {
 				// 标记为已缓存（忽略 DB 错误，不影响已完成的传输）
-				s.db.Model(&ver).Update("cached", true) //nolint:errcheck
+				s.db.WithContext(ctx).Model(&ver).Update("cached", true) //nolint:errcheck
 			}
 		} else {
 			os.Remove(tmp)

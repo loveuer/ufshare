@@ -16,7 +16,7 @@ func NewSettingHandler(s *service.SettingService) *SettingHandler {
 
 // GetAll GET /api/v1/admin/settings
 func (h *SettingHandler) GetAll(c *ursa.Ctx) error {
-	settings, err := h.settingService.GetAll()
+	settings, err := h.settingService.GetAll(c.Request.Context())
 	if err != nil {
 		return c.Status(500).JSON(ursa.Map{"code": 500, "message": "internal server error"})
 	}
@@ -48,7 +48,7 @@ func (h *SettingHandler) Update(c *ursa.Ctx) error {
 		return c.Status(400).JSON(ursa.Map{"code": 400, "message": "invalid request body"})
 	}
 	for key, value := range body {
-		if err := h.settingService.Set(key, value); err != nil {
+		if err := h.settingService.Set(c.Request.Context(), key, value); err != nil {
 			return c.Status(500).JSON(ursa.Map{"code": 500, "message": "failed to save setting: " + key})
 		}
 	}

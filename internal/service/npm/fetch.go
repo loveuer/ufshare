@@ -1,6 +1,7 @@
 package npm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,8 +41,8 @@ type versionCount struct {
 
 // ListPackages 返回分页后的包摘要列表，同时返回总数。
 // search 为空时不过滤；单次查询聚合版本计数，无 N+1 问题。
-func (s *Service) ListPackages(page, pageSize int, search string) ([]PackageSummary, int64, error) {
-	query := s.db.Model(&model.NpmPackage{})
+func (s *Service) ListPackages(ctx context.Context, page, pageSize int, search string) ([]PackageSummary, int64, error) {
+	query := s.db.WithContext(ctx).Model(&model.NpmPackage{})
 	if search != "" {
 		like := "%" + search + "%"
 		query = query.Where("name LIKE ? OR description LIKE ?", like, like)
@@ -66,7 +67,7 @@ func (s *Service) ListPackages(page, pageSize int, search string) ([]PackageSumm
 		pkgIDs[i] = p.ID
 	}
 	var counts []versionCount
-	s.db.Model(&model.NpmVersion{}).
+	s.db.WithContext(ctx).Model(&model.NpmVersion{}).
 		Select("package_id, COUNT(*) as total, SUM(CASE WHEN cached = 1 THEN 1 ELSE 0 END) as cached_count").
 		Where("package_id IN ?", pkgIDs).
 		Group("package_id").
@@ -93,9 +94,9 @@ func (s *Service) ListPackages(page, pageSize int, search string) ([]PackageSumm
 }
 
 // ListVersions 返回某个包的版本列表
-func (s *Service) ListVersions(name string) ([]VersionSummary, error) {
+func (s *Service) ListVersions(ctx context.Context, name string) ([]VersionSummary, error) {
 	var pkg model.NpmPackage
-	if err := s.db.Where("name = ?", name).First(&pkg).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("name = ?", name).First(&pkg).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPackageNotFound
 		}
@@ -103,7 +104,7 @@ func (s *Service) ListVersions(name string) ([]VersionSummary, error) {
 	}
 
 	var versions []model.NpmVersion
-	if err := s.db.Where("package_id = ?", pkg.ID).Order("created_at desc").Find(&versions).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("package_id = ?", pkg.ID).Order("created_at desc").Find(&versions).Error; err != nil {
 		return nil, err
 	}
 
@@ -125,8 +126,8 @@ func (s *Service) ListVersions(name string) ([]VersionSummary, error) {
 // GetPackument 返回包的完整 packument。
 // 优先从本地 DB 构建；本地没有则代理上游并缓存。
 // abbreviated=true 时返回精简格式（仅含安装必需字段），响应体更小。
-func (s *Service) GetPackument(name, baseURL string, abbreviated bool) (*Packument, error) {
-	pack, err := s.buildPackumentFromDB(name, baseURL, abbreviated)
+func (s *Service) GetPackument(ctx context.Context, name, baseURL string, abbreviated bool) (*Packument, error) {
+	pack, err := s.buildPackumentFromDB(ctx, name, baseURL, abbreviated)
 	if err == nil {
 		return pack, nil
 	}
@@ -134,16 +135,16 @@ func (s *Service) GetPackument(name, baseURL string, abbreviated bool) (*Packume
 		return nil, err
 	}
 	// 上游拉取后始终存完整元数据，再按需精简返回
-	if _, e := s.proxyAndCachePackument(name, ""); e != nil {
+	if _, e := s.proxyAndCachePackument(ctx, name, ""); e != nil {
 		return nil, e
 	}
-	return s.buildPackumentFromDB(name, baseURL, abbreviated)
+	return s.buildPackumentFromDB(ctx, name, baseURL, abbreviated)
 }
 
 // GetVersion 返回指定版本的元数据（version-level packument）
-func (s *Service) GetVersion(name, version string) (json.RawMessage, error) {
+func (s *Service) GetVersion(ctx context.Context, name, version string) (json.RawMessage, error) {
 	var pkg model.NpmPackage
-	if err := s.db.Where("name = ?", name).First(&pkg).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("name = ?", name).First(&pkg).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrPackageNotFound
 		}
@@ -151,7 +152,7 @@ func (s *Service) GetVersion(name, version string) (json.RawMessage, error) {
 	}
 
 	var ver model.NpmVersion
-	if err := s.db.Where("package_id = ? AND version = ?", pkg.ID, version).First(&ver).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("package_id = ? AND version = ?", pkg.ID, version).First(&ver).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrVersionNotFound
 		}
@@ -164,7 +165,7 @@ func (s *Service) GetVersion(name, version string) (json.RawMessage, error) {
 // ServeTarball 将 tarball 内容写入 w。
 // 已缓存时直接从磁盘读取；未缓存时流式从上游拉取并同步写入磁盘缓存，
 // 使 npm 客户端无需等待完整下载即可开始接收字节。
-func (s *Service) ServeTarball(pkgName, filename string, w io.Writer) error {
+func (s *Service) ServeTarball(ctx context.Context, pkgName, filename string, w io.Writer) error {
 	diskPath := s.tarballPath(pkgName, filename)
 
 	// 命中缓存：直接读磁盘
@@ -175,9 +176,9 @@ func (s *Service) ServeTarball(pkgName, filename string, w io.Writer) error {
 	}
 
 	// 未缓存：先解析上游 URL，再流式传输
-	upstreamURL, ver, err := s.resolveTarballURL(pkgName, filename)
+	upstreamURL, ver, err := s.resolveTarballURL(ctx, pkgName, filename)
 	if err != nil {
 		return err
 	}
-	return s.streamAndCacheTarball(pkgName, ver, upstreamURL, diskPath, w)
+	return s.streamAndCacheTarball(ctx, pkgName, ver, upstreamURL, diskPath, w)
 }
