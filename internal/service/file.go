@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/model"
@@ -24,7 +24,6 @@ var (
 type FileService struct {
 	db      *gorm.DB
 	dataDir string // {data}/file-store
-	sfGroup singleflight.Group
 }
 
 func NewFileService(db *gorm.DB, dataDir string) *FileService {
@@ -35,31 +34,24 @@ func NewFileService(db *gorm.DB, dataDir string) *FileService {
 }
 
 // Upload 上传文件，filePath 为相对路径如 v1.0/app.tar.gz
-// 同一路径的并发上传通过 singleflight 合并，只执行一次实际写入
+// 每次使用带时间戳的唯一临时文件名，不同路径并发无竞争，
+// 同一路径并发时各自写各自的 tmp 后 rename，幂等（last-write-wins）
 func (s *FileService) Upload(filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
 	filePath = normalizePath(filePath)
 	if err := validatePath(filePath); err != nil {
 		return nil, err
 	}
-
-	type result struct {
-		entry *model.FileEntry
-		err   error
-	}
-	v, _, _ := s.sfGroup.Do(filePath, func() (interface{}, error) {
-		entry, err := s.doUpload(filePath, src, uploaderID, uploaderName)
-		return &result{entry: entry, err: err}, nil
-	})
-	res := v.(*result)
-	return res.entry, res.err
+	return s.doUpload(filePath, src, uploaderID, uploaderName)
 }
 
-func (s *FileService) doUpload(filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {	diskPath := filepath.Join(s.dataDir, filePath)
+func (s *FileService) doUpload(filePath string, src io.Reader, uploaderID uint, uploaderName string) (*model.FileEntry, error) {
+	diskPath := filepath.Join(s.dataDir, filePath)
 	if err := os.MkdirAll(filepath.Dir(diskPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	tmpPath := diskPath + ".tmp"
+	// 唯一临时文件名，避免并发上传同一路径时互相覆盖临时数据
+	tmpPath := fmt.Sprintf("%s.tmp.%d", diskPath, time.Now().UnixNano())
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)

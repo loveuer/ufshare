@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,6 +21,20 @@ var (
 	ErrUserExists         = errors.New("user already exists")
 	ErrUserDisabled       = errors.New("user is disabled")
 )
+
+// hashPassword 使用 bcrypt 对明文密码加密，统一供 AuthService 和 UserService 使用
+func hashPassword(plain string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// checkPassword 校验明文密码与 bcrypt 哈希是否匹配
+func checkPassword(hashed, plain string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hashed), []byte(plain))
+}
 
 type AuthService struct {
 	db        *gorm.DB
@@ -50,15 +65,14 @@ func (s *AuthService) Register(username, password, email string) (*model.User, e
 		return nil, ErrUserExists
 	}
 
-	// 加密密码
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashedPassword, err := hashPassword(password)
 	if err != nil {
 		return nil, err
 	}
 
 	user := &model.User{
 		Username: username,
-		Password: string(hashedPassword),
+		Password: hashedPassword,
 		Email:    email,
 		Status:   1,
 	}
@@ -84,7 +98,7 @@ func (s *AuthService) Login(username, password string) (string, *model.User, err
 		return "", nil, ErrUserDisabled
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+	if err := checkPassword(user.Password, password); err != nil {
 		return "", nil, ErrInvalidCredentials
 	}
 
@@ -100,6 +114,9 @@ func (s *AuthService) Login(username, password string) (string, *model.User, err
 // ValidateToken 验证 JWT token
 func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return s.jwtSecret, nil
 	})
 	if err != nil {
@@ -139,7 +156,7 @@ func (s *AuthService) VerifyCredentials(username, password string) (*model.User,
 		return nil, ErrUserDisabled
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+	if err := checkPassword(user.Password, password); err != nil {
 		return nil, ErrInvalidCredentials
 	}
 
@@ -156,16 +173,16 @@ func (s *AuthService) ChangePassword(userID uint, oldPassword, newPassword strin
 		return err
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
+	if err := checkPassword(user.Password, oldPassword); err != nil {
 		return ErrInvalidCredentials
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hashed, err := hashPassword(newPassword)
 	if err != nil {
 		return err
 	}
 
-	return s.db.Model(&user).Update("password", string(hashed)).Error
+	return s.db.Model(&user).Update("password", hashed).Error
 }
 
 func (s *AuthService) generateToken(user *model.User) (string, error) {

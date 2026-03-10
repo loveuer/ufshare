@@ -75,7 +75,7 @@ func run(cfg *config.Config) error {
 	fileService    := service.NewFileService(db, cfg.Data)
 	settingService := service.NewSettingService(db)
 	npmService     := npmsvc.New(db, cfg.Data, settingService)
-	goService      := gosvc.New(db, cfg.Data, settingService)
+	goService      := gosvc.New(cfg.Data, settingService)
 
 	if err := createDefaultAdmin(authService, userService); err != nil {
 		log.Printf("warning: failed to create default admin: %v", err)
@@ -100,16 +100,16 @@ func run(cfg *config.Config) error {
 		handler.RegisterGoRoutes(app, goHandler, authService, "")
 	})
 
-	// 启动参数写入 settings（仅当 DB 中尚未配置时作为初始值）
-	if cfg.NpmAddr != "" && settingService.GetNpmAddr() == "" {
+	// CLI flag 显式指定时强制覆盖 DB 中的值，保证每次启动 flag 均生效
+	if cfg.NpmAddr != "" {
 		_ = settingService.Set(service.SettingNpmAddr, cfg.NpmAddr)
 		_ = settingService.Set(service.SettingNpmEnabled, "true")
 	}
-	if cfg.FileAddr != "" && settingService.GetFileAddr() == "" {
+	if cfg.FileAddr != "" {
 		_ = settingService.Set(service.SettingFileAddr, cfg.FileAddr)
 		_ = settingService.Set(service.SettingFileEnabled, "true")
 	}
-	if cfg.GoAddr != "" && settingService.GetGoAddr() == "" {
+	if cfg.GoAddr != "" {
 		_ = settingService.Set(service.SettingGoAddr, cfg.GoAddr)
 		_ = settingService.Set(service.SettingGoEnabled, "true")
 	}

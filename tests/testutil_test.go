@@ -71,7 +71,7 @@ func newTestServer(t *testing.T) *testServer {
 
 	router := api.NewRouter(authSvc, userSvc, fileSvc, npmSvc, settingSvc, nil)
 	app := ursa.New(ursa.Config{BodyLimit: -1})
-	router.Setup(app)
+	router.Setup(app, nil)
 
 	go func() { _ = app.Run(addr) }()
 
