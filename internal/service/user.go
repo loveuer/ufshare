@@ -77,7 +77,7 @@ func (s *UserService) DeleteUser(ctx context.Context, callerID, targetID uint) e
 		return ErrCannotDeleteAdmin
 	}
 
-	return s.db.WithContext(ctx).Delete(&model.User{}, targetID).Error
+	return s.db.WithContext(ctx).Unscoped().Delete(&model.User{}, targetID).Error
 }
 
 // CreateUser 创建用户

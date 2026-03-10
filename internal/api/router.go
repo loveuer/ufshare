@@ -113,7 +113,7 @@ func (r *Router) Setup(app *ursa.App, goHandler *handler.GoHandler) {
 func RegisterNpmRoutes(app *ursa.App, npmHandler *handler.NpmHandler, auth *service.AuthService, prefix string) {
 	// 基础端点（公开）
 	app.Get(prefix+"/-/ping", npmHandler.Ping)
-	app.Get(prefix+"/-/whoami", npmHandler.Whoami) // 移除 middleware
+	app.Get(prefix+"/-/whoami", middleware.OptionalAuth(auth), npmHandler.Whoami)
 	// npm login: PUT {prefix}/-/user/org.couchdb.user:<username>
 	app.Put(prefix+"/-/user/:id", npmHandler.Login)
 
