@@ -18,6 +18,7 @@ type Config struct {
 	Debug    bool
 	Address  string        // 监听地址，如 0.0.0.0:9817
 	Data     string        // 数据目录，存放上传文件和数据库
+	DBPath   string        // 数据库文件路径（可选），不指定时默认为 <data>/ufshare.db
 	NpmAddr  string        // npm 专用端口，如 0.0.0.0:4873（可选）
 	FileAddr string        // file-store 专用端口，如 0.0.0.0:8001（可选）
 	GoAddr   string        // go 模块代理专用端口，如 0.0.0.0:8081（可选）
@@ -55,7 +56,11 @@ func Load() *Config {
 // Finalize 在命令行 flag 解析完成后调用，补全运行时依赖 Data 才能确定的默认值
 func (c *Config) Finalize() {
 	if c.Database.Driver == "sqlite" && c.Database.DSN == "" {
-		c.Database.DSN = filepath.Join(c.Data, "ufshare.db")
+		if c.DBPath != "" {
+			c.Database.DSN = c.DBPath
+		} else {
+			c.Database.DSN = filepath.Join(c.Data, "ufshare.db")
+		}
 	}
 }
 
