@@ -42,11 +42,14 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&cfg.Address, "address", cfg.Address, "监听地址 (e.g. 0.0.0.0:8000)")
+	cmd.Flags().StringVar(&cfg.Address, "address", cfg.Address, "监听地址 (e.g. 0.0.0.0:9817)")
 	cmd.Flags().StringVar(&cfg.Data, "data", cfg.Data, "数据目录，存放文件和数据库")
 	cmd.Flags().BoolVar(&cfg.Debug, "debug", false, "开启 debug 模式（打印 GORM 日志及详细流程）")
 	cmd.Flags().StringVar(&cfg.NpmAddr, "npm-addr", "", "npm 专用端口（可选，如 0.0.0.0:4873）")
 	cmd.Flags().StringVar(&cfg.FileAddr, "file-addr", "", "file-store 专用端口（可选，如 0.0.0.0:8001）")
+
+	// 添加子命令
+	cmd.AddCommand(newInstallCmd())
 
 	return cmd
 }
@@ -80,11 +83,11 @@ func run(cfg *config.Config) error {
 	npmHandler  := handler.NewNpmHandler(npmService, authService)
 	fileHandler := handler.NewFileHandler(fileService)
 
-	npmDedicated := pkgserver.New("npm", func(app *ursa.App) {
+	npmDedicated := pkgserver.New("npm", cfg.BodySize, func(app *ursa.App) {
 		api.RegisterNpmRoutes(app, npmHandler, authService, "")
 		api.RegisterNpmRoutes(app, npmHandler, authService, "/npm")
 	})
-	fileDedicated := pkgserver.New("file", func(app *ursa.App) {
+	fileDedicated := pkgserver.New("file", cfg.BodySize, func(app *ursa.App) {
 		app.Get("/*path", fileHandler.Download)
 		app.Put("/*path", middleware.Auth(authService), fileHandler.Upload)
 		app.Delete("/*path", middleware.Auth(authService), fileHandler.Delete)
@@ -131,7 +134,7 @@ func run(cfg *config.Config) error {
 
 	router := api.NewRouter(authService, userService, fileService, npmService, settingService, web.FS())
 
-	appConfig := ursa.Config{BodyLimit: -1}
+	appConfig := ursa.Config{BodyLimit: cfg.BodySize}
 	if spaHandler := router.SPAHandler(); spaHandler != nil {
 		appConfig.NotFoundHandler = spaHandler
 	}
@@ -140,9 +143,28 @@ func run(cfg *config.Config) error {
 
 	log.Printf("data dir : %s", cfg.Data)
 	log.Printf("database : %s", cfg.Database.DSN)
+	log.Printf("body limit: %s", formatBodySize(cfg.BodySize))
 	log.Printf("listening: %s", cfg.Address)
 
 	return app.Run(cfg.Address)
+}
+
+func formatBodySize(n int64) string {
+	if n < 0 {
+		return "unlimited"
+	}
+	units := []struct {
+		thresh int64
+		label  string
+	}{
+		{1 << 40, "TiB"}, {1 << 30, "GiB"}, {1 << 20, "MiB"}, {1 << 10, "KiB"},
+	}
+	for _, u := range units {
+		if n >= u.thresh {
+			return fmt.Sprintf("%.2g %s", float64(n)/float64(u.thresh), u.label)
+		}
+	}
+	return fmt.Sprintf("%d B", n)
 }
 
 func createDefaultAdmin(authService *service.AuthService, userService *service.UserService) error {

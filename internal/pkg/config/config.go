@@ -4,7 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
+)
+
+const (
+	DefaultBodySize    int64 = 1 << 30 // 1 GB
+	defaultJWTSecret         = "ufshare-secret-key-change-in-production"
 )
 
 type Config struct {
@@ -13,6 +20,7 @@ type Config struct {
 	Data     string        // 数据目录，存放上传文件和数据库
 	NpmAddr  string        // npm 专用端口，如 0.0.0.0:4873（可选）
 	FileAddr string        // file-store 专用端口，如 0.0.0.0:8001（可选）
+	BodySize int64         // 请求体大小限制（字节），-1 表示不限制
 	Database DatabaseConfig
 	JWT      JWTConfig
 }
@@ -27,11 +35,9 @@ type JWTConfig struct {
 	Expire time.Duration
 }
 
-const defaultJWTSecret = "ufshare-secret-key-change-in-production"
-
 func Load() *Config {
 	return &Config{
-		Address: getEnv("UFSHARE_ADDRESS", "0.0.0.0:8000"),
+		Address: getEnv("UFSHARE_ADDRESS", "0.0.0.0:9817"),
 		Data:    getEnv("UFSHARE_DATA", "."),
 		Database: DatabaseConfig{
 			Driver: getEnv("DB_DRIVER", "sqlite"),
@@ -41,6 +47,7 @@ func Load() *Config {
 			Secret: getEnv("JWT_SECRET", ""),
 			Expire: 24 * time.Hour,
 		},
+		BodySize: parseBodySize(getEnv("BODY_SIZE", "1GB")),
 	}
 }
 
@@ -68,6 +75,45 @@ func (c *Config) Validate() error {
 		)
 	}
 	return nil
+}
+
+// parseBodySize 解析人类可读的大小字符串，如 "1GB"、"500MB"、"10737418240"。
+// 无法解析时返回默认值 DefaultBodySize。
+func parseBodySize(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return DefaultBodySize
+	}
+	if s == "-1" {
+		return -1
+	}
+
+	upper := strings.ToUpper(s)
+	// 按后缀长度从长到短匹配，避免 "GB" 被 "B" 先匹配
+	units := []struct {
+		suffix string
+		mult   int64
+	}{
+		{"TIB", 1 << 40}, {"GIB", 1 << 30}, {"MIB", 1 << 20}, {"KIB", 1 << 10},
+		{"TB", 1_000_000_000_000}, {"GB", 1 << 30}, {"MB", 1 << 20}, {"KB", 1024}, {"B", 1},
+	}
+	for _, u := range units {
+		if strings.HasSuffix(upper, u.suffix) {
+			numStr := strings.TrimSpace(upper[:len(upper)-len(u.suffix)])
+			n, err := strconv.ParseFloat(numStr, 64)
+			if err != nil || n < 0 {
+				return DefaultBodySize
+			}
+			return int64(n * float64(u.mult))
+		}
+	}
+
+	// 纯数字（字节）
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return DefaultBodySize
+	}
+	return n
 }
 
 func getEnv(key, defaultValue string) string {

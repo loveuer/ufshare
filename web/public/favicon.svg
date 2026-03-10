@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#e0e7ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆形 -->
+  <circle cx="50" cy="50" r="48" fill="url(#bg)"/>
+
+  <!-- 外圈装饰 -->
+  <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+
+  <!-- 包裹/箱子图形 -->
+  <g transform="translate(50, 52)">
+    <!-- 箱子主体 -->
+    <rect x="-22" y="-18" width="44" height="36" rx="4" fill="url(#box)"/>
+
+    <!-- 箱子顶部盖子 -->
+    <path d="M-22 -18 L-18 -26 L18 -26 L22 -18 Z" fill="#c7d2fe"/>
+
+    <!-- 箱子上的 U 字母 -->
+    <path d="M-10 -8 L-10 8 Q-10 14 0 14 Q10 14 10 8 L10 -8"
+          fill="none"
+          stroke="#4f46e5"
+          stroke-width="5"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <!-- 箱子中间的胶带线 -->
+    <rect x="-2" y="-18" width="4" height="36" fill="#c7d2fe" opacity="0.6"/>
+  </g>
+</svg>

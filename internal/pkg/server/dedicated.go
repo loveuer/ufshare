@@ -19,17 +19,18 @@ type SetupFunc func(app *ursa.App)
 
 // Dedicated 管理一个独立 HTTP 服务器的生命周期（启动/停止/重启）
 type Dedicated struct {
-	name    string
-	setup   SetupFunc
-	mu      sync.Mutex
-	srv     *http.Server
-	cancel  context.CancelFunc
-	started bool
+	name      string
+	setup     SetupFunc
+	bodyLimit int64
+	mu        sync.Mutex
+	srv       *http.Server
+	cancel    context.CancelFunc
+	started   bool
 }
 
-// New 创建一个 Dedicated，name 仅用于日志标识，setup 负责注册路由
-func New(name string, setup SetupFunc) *Dedicated {
-	return &Dedicated{name: name, setup: setup}
+// New 创建一个 Dedicated，name 仅用于日志标识，bodyLimit 透传给 ursa（-1 不限制），setup 负责注册路由
+func New(name string, bodyLimit int64, setup SetupFunc) *Dedicated {
+	return &Dedicated{name: name, bodyLimit: bodyLimit, setup: setup}
 }
 
 // Start 在 addr 上启动独立服务器（非阻塞）。
@@ -61,7 +62,7 @@ func (d *Dedicated) startLocked(addr string) {
 		return
 	}
 
-	app := ursa.New(ursa.Config{BodyLimit: -1})
+	app := ursa.New(ursa.Config{BodyLimit: d.bodyLimit})
 	d.setup(app)
 
 	ln, err := net.Listen("tcp", addr)
