@@ -19,7 +19,7 @@ const GradientBackground = styled(Box)({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  background: 'linear-gradient(135deg, #11998e 0%, #0d7a6e 100%)',
   position: 'relative',
   overflow: 'hidden',
   '&::before': {
@@ -29,7 +29,7 @@ const GradientBackground = styled(Box)({
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%)',
+    background: 'radial-gradient(circle at 20% 80%, rgba(17, 153, 142, 0.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%)',
   },
 })
 
@@ -58,8 +58,8 @@ const StyledCard = styled(Card)({
 const LogoAvatar = styled(Avatar)({
   width: 72,
   height: 72,
-  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-  boxShadow: '0 10px 20px rgba(102, 126, 234, 0.3)',
+  background: 'linear-gradient(135deg, #11998e 0%, #0d7a6e 100%)',
+  boxShadow: '0 10px 20px rgba(17, 153, 142, 0.3)',
   marginBottom: 16,
 })
 
@@ -109,7 +109,7 @@ export default function LoginPage() {
 
           {/* 标题 */}
           <Typography variant="h4" fontWeight="bold" mb={0.5} sx={{
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: 'linear-gradient(135deg, #11998e 0%, #0d7a6e 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
           }}>
@@ -186,11 +186,11 @@ export default function LoginPage() {
                 mt: 1,
                 py: 1.5,
                 borderRadius: 2,
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+                background: 'linear-gradient(135deg, #11998e 0%, #0d7a6e 100%)',
+                boxShadow: '0 4px 15px rgba(17, 153, 142, 0.4)',
                 '&:hover': {
-                  background: 'linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%)',
-                  boxShadow: '0 6px 20px rgba(102, 126, 234, 0.5)',
+                  background: 'linear-gradient(135deg, #0d7a6e 0%, #11998e 100%)',
+                  boxShadow: '0 6px 20px rgba(17, 153, 142, 0.5)',
                 },
               }}
             >
