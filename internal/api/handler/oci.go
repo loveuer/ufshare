@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"errors"
 	"io"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/loveuer/ursa"
 
+	"gitea.loveuer.com/loveuer/ufshare/v2/internal/api/middleware"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
 	ocisvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/oci"
 )
@@ -40,6 +42,21 @@ func (h *OciHandler) DispatchGet(c *ursa.Ctx) error {
 // DispatchHead HEAD /v2/*path
 func (h *OciHandler) DispatchHead(c *ursa.Ctx) error {
 	return h.dispatch(c, true)
+}
+
+// DispatchPut PUT /v2/*path
+func (h *OciHandler) DispatchPut(c *ursa.Ctx) error {
+	return h.dispatchPut(c)
+}
+
+// DispatchPost POST /v2/*path
+func (h *OciHandler) DispatchPost(c *ursa.Ctx) error {
+	return h.dispatchPost(c)
+}
+
+// DispatchDelete DELETE /v2/*path
+func (h *OciHandler) DispatchDelete(c *ursa.Ctx) error {
+	return h.dispatchDelete(c)
 }
 
 func (h *OciHandler) dispatch(c *ursa.Ctx, headOnly bool) error {
@@ -92,6 +109,72 @@ func (h *OciHandler) dispatch(c *ursa.Ctx, headOnly bool) error {
 	}
 
 	return c.Status(404).JSON(ursa.Map{"errors": []ursa.Map{{"code": "NAME_UNKNOWN", "message": "unknown endpoint"}}})
+}
+
+func (h *OciHandler) dispatchPut(c *ursa.Ctx) error {
+	path := c.Param("path")
+	urlPath := c.Request.URL.Path
+	if idx := strings.Index(urlPath, "/v2"); idx >= 0 {
+		path = urlPath[idx+3:]
+	}
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+
+	// PUT manifest: <name>/manifests/<ref>
+	if idx := strings.LastIndex(path, "/manifests/"); idx > 0 {
+		name := path[:idx]
+		ref := path[idx+len("/manifests/"):]
+		return h.putManifest(c, name, ref)
+	}
+
+	// PUT blob upload complete: <name>/blobs/uploads/<uuid>?digest=<digest>
+	if idx := strings.LastIndex(path, "/blobs/uploads/"); idx > 0 {
+		name := path[:idx]
+		// uuid := path[idx+len("/blobs/uploads/"):]
+		digest := c.Query("digest")
+		if digest != "" {
+			return h.putBlobUpload(c, name, digest)
+		}
+	}
+
+	return c.Status(404).JSON(ociError("UNSUPPORTED", "unsupported PUT endpoint"))
+}
+
+func (h *OciHandler) dispatchPost(c *ursa.Ctx) error {
+	path := c.Param("path")
+	urlPath := c.Request.URL.Path
+	if idx := strings.Index(urlPath, "/v2"); idx >= 0 {
+		path = urlPath[idx+3:]
+	}
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+
+	// POST blob upload: <name>/blobs/uploads/
+	if strings.HasSuffix(path, "/blobs/uploads") || strings.HasSuffix(path, "/blobs/uploads/") {
+		name := path[:strings.LastIndex(path, "/blobs/uploads")]
+		return h.postBlobUpload(c, name)
+	}
+
+	return c.Status(404).JSON(ociError("UNSUPPORTED", "unsupported POST endpoint"))
+}
+
+func (h *OciHandler) dispatchDelete(c *ursa.Ctx) error {
+	path := c.Param("path")
+	urlPath := c.Request.URL.Path
+	if idx := strings.Index(urlPath, "/v2"); idx >= 0 {
+		path = urlPath[idx+3:]
+	}
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+
+	// DELETE manifest: <name>/manifests/<ref>
+	if idx := strings.LastIndex(path, "/manifests/"); idx > 0 {
+		name := path[:idx]
+		ref := path[idx+len("/manifests/"):]
+		return h.deleteManifest(c, name, ref)
+	}
+
+	return c.Status(404).JSON(ociError("UNSUPPORTED", "unsupported DELETE endpoint"))
 }
 
 // Catalog GET /v2/_catalog
@@ -294,4 +377,147 @@ func ociError(code, message string) ursa.Map {
 			"message": message,
 		}},
 	}
+}
+
+// resolveAuth 从请求中解析认证信息，返回 (userID, username, ok)
+func (h *OciHandler) resolveAuth(c *ursa.Ctx) (uint, string, bool) {
+	// 优先从 Locals 获取（已由中间件解析）
+	userID := middleware.GetUserID(c)
+	username := middleware.GetUsername(c)
+	if userID > 0 && username != "" {
+		return userID, username, true
+	}
+
+	// 尝试直接解析 Authorization header
+	header := c.Get("Authorization")
+	if header == "" {
+		return 0, "", false
+	}
+
+	// 这里复用 middleware 的逻辑，但直接返回结果
+	// 由于 middleware 的 resolveAuth 不导出，我们手动处理
+	if strings.HasPrefix(header, "Bearer ") {
+		token := strings.TrimPrefix(header, "Bearer ")
+		claims, err := h.auth.ValidateToken(token)
+		if err != nil {
+			return 0, "", false
+		}
+		return claims.UserID, claims.Username, true
+	}
+
+	if strings.HasPrefix(header, "Basic ") {
+		// Basic auth 处理
+		encoded := strings.TrimPrefix(header, "Basic ")
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return 0, "", false
+		}
+		parts := strings.SplitN(string(decoded), ":", 2)
+		if len(parts) != 2 {
+			return 0, "", false
+		}
+		user, err := h.auth.VerifyCredentials(c.Request.Context(), parts[0], parts[1])
+		if err != nil {
+			return 0, "", false
+		}
+		return user.ID, user.Username, true
+	}
+
+	return 0, "", false
+}
+
+// ── Push 相关处理方法 ─────────────────────────────────────────────────────────
+
+// putManifest PUT /v2/<name>/manifests/<reference>
+func (h *OciHandler) putManifest(c *ursa.Ctx, name, reference string) error {
+	// 认证检查 - 使用 Basic Auth 或 Bearer Token
+	userID, username, ok := h.resolveAuth(c)
+	if !ok {
+		// Docker 客户端需要正确的 WWW-Authenticate header
+		// 返回 Basic auth 挑战，让客户端使用 Basic Auth
+		c.Set("WWW-Authenticate", `Basic realm="UFShare Docker Registry"`)
+		return c.Status(401).JSON(ociError("UNAUTHORIZED", "authentication required"))
+	}
+
+	// 读取 manifest 内容
+	content, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return c.Status(400).JSON(ociError("MANIFEST_INVALID", "invalid manifest"))
+	}
+
+	mediaType := c.Request.Header.Get("Content-Type")
+	if mediaType == "" {
+		mediaType = "application/vnd.docker.distribution.manifest.v2+json"
+	}
+
+	// 保存 manifest
+	digest, err := h.oci.PushManifest(c.Request.Context(), name, reference, mediaType, content, userID, username)
+	if err != nil {
+		return c.Status(500).JSON(ociError("UNKNOWN", err.Error()))
+	}
+
+	c.Set("Docker-Content-Digest", digest)
+	c.Set("Docker-Distribution-API-Version", "registry/2.0")
+	return c.SendStatus(201)
+}
+
+// postBlobUpload POST /v2/<name>/blobs/uploads/
+// 初始化 blob 上传
+func (h *OciHandler) postBlobUpload(c *ursa.Ctx, name string) error {
+	// 认证检查
+	if _, _, ok := h.resolveAuth(c); !ok {
+		c.Set("WWW-Authenticate", `Basic realm="UFShare Docker Registry"`)
+		return c.Status(401).JSON(ociError("UNAUTHORIZED", "authentication required"))
+	}
+
+	uploadURL, err := h.oci.InitiateUpload(c.Request.Context(), name)
+	if err != nil {
+		return c.Status(500).JSON(ociError("UNKNOWN", err.Error()))
+	}
+
+	c.Set("Location", uploadURL)
+	c.Set("Docker-Distribution-API-Version", "registry/2.0")
+	c.Set("Range", "0-0")
+	return c.SendStatus(202)
+}
+
+// putBlobUpload PUT /v2/<name>/blobs/uploads/<uuid>?digest=<digest>
+// 完成 blob 上传
+func (h *OciHandler) putBlobUpload(c *ursa.Ctx, name, digest string) error {
+	// 认证检查
+	if _, _, ok := h.resolveAuth(c); !ok {
+		c.Set("WWW-Authenticate", `Basic realm="UFShare Docker Registry"`)
+		return c.Status(401).JSON(ociError("UNAUTHORIZED", "authentication required"))
+	}
+
+	// 保存 blob
+	if err := h.oci.PushBlob(c.Request.Context(), digest, c.Request.Body); err != nil {
+		return c.Status(500).JSON(ociError("UNKNOWN", err.Error()))
+	}
+
+	c.Set("Docker-Content-Digest", digest)
+	c.Set("Docker-Distribution-API-Version", "registry/2.0")
+	return c.SendStatus(201)
+}
+
+// deleteManifest DELETE /v2/<name>/manifests/<reference>
+func (h *OciHandler) deleteManifest(c *ursa.Ctx, name, reference string) error {
+	// 认证检查（仅管理员或推送者可删除）
+	userID, _, ok := h.resolveAuth(c)
+	if !ok {
+		c.Set("WWW-Authenticate", `Bearer realm="ufshare",service="registry"`)
+		return c.Status(401).JSON(ociError("UNAUTHORIZED", "authentication required"))
+	}
+
+	if err := h.oci.DeleteManifest(c.Request.Context(), name, reference, userID); err != nil {
+		if errors.Is(err, ocisvc.ErrManifestNotFound) {
+			return c.Status(404).JSON(ociError("MANIFEST_UNKNOWN", "manifest unknown"))
+		}
+		if errors.Is(err, ocisvc.ErrForbidden) {
+			return c.Status(403).JSON(ociError("DENIED", "forbidden"))
+		}
+		return c.Status(500).JSON(ociError("UNKNOWN", err.Error()))
+	}
+
+	return c.SendStatus(202)
 }

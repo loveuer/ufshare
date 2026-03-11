@@ -20,6 +20,9 @@ type RepoInfo struct {
 	CachedBlobCount int64  `json:"cached_blob_count"`
 	TotalSize       int64  `json:"total_size"`
 	UpdatedAt       string `json:"updated_at"`
+	IsPushed        bool   `json:"is_pushed"`
+	PushedBy        string `json:"pushed_by"`
+	PushedByID      uint   `json:"pushed_by_id"`
 }
 
 // TagInfo 管理 API 返回的 tag 信息
@@ -162,6 +165,9 @@ func (s *Service) ListRepositories(ctx context.Context, page, pageSize int, sear
 			CachedBlobCount: cachedCount,
 			TotalSize:       totalSize,
 			UpdatedAt:       r.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			IsPushed:        r.IsPushed,
+			PushedBy:        r.PushedBy,
+			PushedByID:      r.PushedByID,
 		})
 	}
 

@@ -170,6 +170,9 @@ func RegisterNpmRoutes(app *ursa.App, npmHandler *handler.NpmHandler, auth *serv
 func RegisterOciRoutes(app *ursa.App, ociHandler *handler.OciHandler, _ *service.AuthService, prefix string) {
 	app.Get(prefix+"/v2/*path", ociHandler.DispatchGet)
 	app.Head(prefix+"/v2/*path", ociHandler.DispatchHead)
+	app.Put(prefix+"/v2/*path", ociHandler.DispatchPut)
+	app.Post(prefix+"/v2/*path", ociHandler.DispatchPost)
+	app.Delete(prefix+"/v2/*path", ociHandler.DispatchDelete)
 }
 
 // RegisterFileRoutes 在 app 上以 prefix 为前缀注册 file-store 路由。

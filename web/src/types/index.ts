@@ -75,6 +75,9 @@ export interface OciRepository {
   cached_blob_count: number
   total_size: number
   updated_at: string
+  is_pushed: boolean
+  pushed_by: string
+  pushed_by_id: number
 }
 
 export interface OciTagInfo {

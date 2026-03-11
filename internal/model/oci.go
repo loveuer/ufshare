@@ -11,6 +11,11 @@ type OciRepository struct {
 	Name     string `json:"name" gorm:"uniqueIndex;size:256;not null"` // e.g. "library/nginx"
 	Upstream string `json:"upstream" gorm:"size:256"`                  // 来源 registry，如 "docker.io"
 
+	// Push 相关信息
+	IsPushed   bool   `json:"is_pushed" gorm:"default:false"` // 是否是本地推送的镜像
+	PushedByID uint   `json:"pushed_by_id" gorm:"index"`      // 推送者用户ID
+	PushedBy   string `json:"pushed_by" gorm:"size:64"`       // 推送者用户名
+
 	Tags []OciTag `json:"-" gorm:"foreignKey:RepositoryID"`
 }
 
