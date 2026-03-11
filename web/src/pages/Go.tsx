@@ -1,23 +1,20 @@
 import { useEffect, useState } from 'react'
 import {
-  Box, Card, CardContent, Typography, Button, TextField, Alert,
-  CircularProgress, Divider, Paper, Grid, IconButton, Tooltip,
+  Box, Card, CardContent, Typography, Alert,
+  CircularProgress, Paper, Grid, IconButton, Tooltip,
   Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle,
+  Button,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import { goApi, settingApi } from '../api'
+import { goApi } from '../api'
 import type { GoCacheStats } from '../types'
 
 export default function GoPage() {
   const [stats, setStats] = useState<GoCacheStats | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [, setSettings] = useState<Record<string, string>>({})
-  const [upstream, setUpstream] = useState('')
-  const [goprivate, setGoprivate] = useState('')
-  const [saving, setSaving] = useState(false)
   const [cleanDialogOpen, setCleanDialogOpen] = useState(false)
   const [cleaning, setCleaning] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -35,37 +32,9 @@ export default function GoPage() {
     }
   }
 
-  const loadSettings = async () => {
-    try {
-      const res = await settingApi.getAll()
-      const data = res.data.data
-      setSettings(data)
-      setUpstream(data['go.upstream'] || 'https://goproxy.cn,direct')
-      setGoprivate(data['go.private'] || '')
-    } catch (err: unknown) {
-      console.error('Failed to load settings')
-    }
-  }
-
   useEffect(() => {
     loadStats()
-    loadSettings()
   }, [])
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      await settingApi.update({
-        'go.upstream': upstream,
-        'go.private': goprivate,
-      })
-      await loadSettings()
-    } catch (err: unknown) {
-      setError('Failed to save settings')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const handleCleanCache = async () => {
     setCleaning(true)
@@ -217,6 +186,24 @@ export default function GoPage() {
                       {stats.cache_dir}
                     </Typography>
                   </Grid>
+                  <Grid size={{ xs: 12 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Upstream
+                    </Typography>
+                    <Typography variant="body2" fontFamily="monospace">
+                      {stats.upstream || 'https://goproxy.cn,direct'}
+                    </Typography>
+                  </Grid>
+                  {stats.goprivate && (
+                    <Grid size={{ xs: 12 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        GOPRIVATE
+                      </Typography>
+                      <Typography variant="body2" fontFamily="monospace">
+                        {stats.goprivate}
+                      </Typography>
+                    </Grid>
+                  )}
                 </Grid>
               ) : (
                 <Typography color="text.secondary">No cache data available</Typography>
@@ -225,49 +212,8 @@ export default function GoPage() {
           </Card>
         </Grid>
 
-        {/* 设置 */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Settings
-              </Typography>
-
-              <Box display="flex" flexDirection="column" gap={2}>
-                <TextField
-                  label="Upstream Proxy"
-                  value={upstream}
-                  onChange={(e) => setUpstream(e.target.value)}
-                  placeholder="https://goproxy.cn,direct"
-                  helperText="Go proxy upstream servers, comma separated"
-                  fullWidth
-                />
-
-                <TextField
-                  label="GOPRIVATE"
-                  value={goprivate}
-                  onChange={(e) => setGoprivate(e.target.value)}
-                  placeholder="github.com/mycompany/*"
-                  helperText="Modules that should not use the proxy"
-                  fullWidth
-                />
-
-                <Box display="flex" gap={1}>
-                  <Button
-                    variant="contained"
-                    onClick={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? <CircularProgress size={20} /> : 'Save'}
-                  </Button>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
         {/* 使用说明 */}
-        <Grid size={{ xs: 12 }}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -326,29 +272,6 @@ export default function GoPage() {
                     }}
                   >
                     go env -w GOPRIVATE=github.com/mycompany/*
-                  </Paper>
-                </Box>
-
-                <Divider />
-
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Direct Download URL (for go get)
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    You can also use the dedicated Go proxy port if configured:
-                  </Typography>
-                  <Paper
-                    variant="outlined"
-                    sx={{
-                      p: 1.5,
-                      mt: 1,
-                      bgcolor: 'grey.50',
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                    }}
-                  >
-                    GOPROXY=http://{'<'}host{'>'}:8081
                   </Paper>
                 </Box>
               </Box>

@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   AppBar, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   Drawer, List, ListItemButton, ListItemIcon, ListItemText,
-  TextField, Toolbar, Typography, IconButton, Tooltip,
+  TextField, Toolbar, Typography, Menu, MenuItem,
+  Avatar, Divider,
 } from '@mui/material'
 import PeopleIcon from '@mui/icons-material/People'
 import FolderIcon from '@mui/icons-material/Folder'
@@ -13,6 +14,7 @@ import ViewModuleIcon from '@mui/icons-material/ViewModule'
 import StorageIcon from '@mui/icons-material/Storage'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import SettingsIcon from '@mui/icons-material/Settings'
+import AccountCircleIcon from '@mui/icons-material/AccountCircle'
 import { useAuth } from '../store/auth'
 import { authApi } from '../api'
 
@@ -36,6 +38,10 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [pwdData, setPwdData] = useState({ old: '', new_: '', confirm: '' })
   const [pwdError, setPwdError] = useState('')
   const [pwdSuccess, setPwdSuccess] = useState(false)
+
+  // User menu state
+  const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null)
+  const userMenuOpen = Boolean(userMenuAnchor)
 
   const handleLogout = () => {
     logout()
@@ -64,6 +70,24 @@ export default function Layout({ children }: { children: ReactNode }) {
     setPwdData({ old: '', new_: '', confirm: '' })
   }
 
+  const handleUserMenuClick = (event: React.MouseEvent<HTMLElement>) => {
+    setUserMenuAnchor(event.currentTarget)
+  }
+
+  const handleUserMenuClose = () => {
+    setUserMenuAnchor(null)
+  }
+
+  const handleOpenChangePassword = () => {
+    handleUserMenuClose()
+    setPwdOpen(true)
+  }
+
+  const handleLogoutClick = () => {
+    handleUserMenuClose()
+    handleLogout()
+  }
+
   return (
     <Box display="flex">
       <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
@@ -71,19 +95,58 @@ export default function Layout({ children }: { children: ReactNode }) {
           <Typography variant="h6" fontWeight="bold" sx={{ flexGrow: 1 }}>
             UFShare
           </Typography>
-          <Typography variant="body2" sx={{ mr: 1, opacity: 0.8 }}>
-            {user?.username}
-          </Typography>
-          <Tooltip title="Change Password">
-            <IconButton color="inherit" onClick={() => setPwdOpen(true)}>
-              <LockIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Logout">
-            <IconButton color="inherit" onClick={handleLogout}>
-              <LogoutIcon />
-            </IconButton>
-          </Tooltip>
+
+          {/* User menu button */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              cursor: 'pointer',
+              borderRadius: 1,
+              px: 1,
+              py: 0.5,
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' },
+            }}
+            onClick={handleUserMenuClick}
+          >
+            <Avatar sx={{ width: 32, height: 32, mr: 1, bgcolor: 'primary.light' }}>
+              <AccountCircleIcon />
+            </Avatar>
+            <Typography variant="body2" sx={{ mr: 0.5 }}>
+              {user?.username}
+            </Typography>
+          </Box>
+
+          {/* User dropdown menu */}
+          <Menu
+            anchorEl={userMenuAnchor}
+            open={userMenuOpen}
+            onClose={handleUserMenuClose}
+            onClick={handleUserMenuClose}
+            PaperProps={{
+              sx: { minWidth: 180 },
+            }}
+            transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+            anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+          >
+            <Box sx={{ px: 2, py: 1 }}>
+              <Typography variant="subtitle2" noWrap>
+                {user?.username}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {user?.is_admin ? 'Administrator' : 'User'}
+              </Typography>
+            </Box>
+            <Divider />
+            <MenuItem onClick={handleOpenChangePassword}>
+              <LockIcon fontSize="small" sx={{ mr: 1 }} />
+              Change Password
+            </MenuItem>
+            <MenuItem onClick={handleLogoutClick}>
+              <LogoutIcon fontSize="small" sx={{ mr: 1 }} />
+              Logout
+            </MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
 
@@ -151,4 +214,3 @@ export default function Layout({ children }: { children: ReactNode }) {
     </Box>
   )
 }
-

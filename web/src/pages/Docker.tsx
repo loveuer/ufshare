@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
-  Box, Card, CardContent, Typography, Button, TextField, Alert,
+  Box, Card, CardContent, Typography, Alert,
   CircularProgress, Paper, Grid, IconButton, Tooltip, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow,
   TablePagination, Collapse, Dialog, DialogActions, DialogContent,
-  DialogContentText, DialogTitle,
+  DialogContentText, DialogTitle, Button,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -12,7 +12,8 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import SearchIcon from '@mui/icons-material/Search'
-import { ociApi, settingApi } from '../api'
+import TextField from '@mui/material/TextField'
+import { ociApi } from '../api'
 import type { OciRepository, OciTagInfo, OciCacheStats } from '../types'
 
 export default function DockerPage() {
@@ -24,10 +25,6 @@ export default function DockerPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [upstream, setUpstream] = useState('')
-  const [httpProxy, setHttpProxy] = useState('')
-  const [httpsProxy, setHttpsProxy] = useState('')
-  const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState(false)
   const [expandedRepo, setExpandedRepo] = useState<string | null>(null)
   const [repoTags, setRepoTags] = useState<OciTagInfo[]>([])
@@ -59,22 +56,9 @@ export default function DockerPage() {
     }
   }
 
-  const loadSettings = async () => {
-    try {
-      const res = await settingApi.getAll()
-      const data = res.data.data
-      setUpstream(data['oci.upstream'] || 'https://registry-1.docker.io')
-      setHttpProxy(data['oci.http_proxy'] || '')
-      setHttpsProxy(data['oci.https_proxy'] || '')
-    } catch {
-      // ignore
-    }
-  }
-
   useEffect(() => {
     loadStats()
     loadRepos()
-    loadSettings()
   }, [])
 
   useEffect(() => {
@@ -84,22 +68,6 @@ export default function DockerPage() {
   const handleSearch = () => {
     setPage(0)
     loadRepos()
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      await settingApi.update({
-        'oci.upstream': upstream,
-        'oci.http_proxy': httpProxy,
-        'oci.https_proxy': httpsProxy,
-      })
-      await loadSettings()
-    } catch {
-      setError('Failed to save settings')
-    } finally {
-      setSaving(false)
-    }
   }
 
   const handleExpandRepo = async (name: string) => {
@@ -261,43 +229,23 @@ export default function DockerPage() {
           </Card>
         </Grid>
 
-        {/* Settings */}
+        {/* Upstream Info */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card>
             <CardContent>
-              <Typography variant="h6" gutterBottom>Settings</Typography>
-              <Box display="flex" flexDirection="column" gap={2}>
-                <TextField
-                  label="Upstream Registry"
-                  value={upstream}
-                  onChange={(e) => setUpstream(e.target.value)}
-                  placeholder="https://registry-1.docker.io"
-                  helperText="Docker registry upstream for proxy/cache"
-                  fullWidth
-                  size="small"
-                />
-                <TextField
-                  label="HTTP Proxy"
-                  value={httpProxy}
-                  onChange={(e) => setHttpProxy(e.target.value)}
-                  placeholder="http://proxy:8080"
-                  helperText="HTTP proxy for upstream connections"
-                  fullWidth
-                  size="small"
-                />
-                <TextField
-                  label="HTTPS Proxy"
-                  value={httpsProxy}
-                  onChange={(e) => setHttpsProxy(e.target.value)}
-                  placeholder="http://proxy:8080"
-                  helperText="HTTPS proxy for upstream connections"
-                  fullWidth
-                  size="small"
-                />
-                <Button variant="contained" onClick={handleSave} disabled={saving}>
-                  {saving ? <CircularProgress size={20} /> : 'Save'}
-                </Button>
-              </Box>
+              <Typography variant="h6" gutterBottom>Upstream</Typography>
+              {stats ? (
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Registry
+                  </Typography>
+                  <Typography variant="body2" fontFamily="monospace" gutterBottom>
+                    {stats.upstream || 'https://registry-1.docker.io'}
+                  </Typography>
+                </Box>
+              ) : (
+                <Typography color="text.secondary">Loading...</Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>

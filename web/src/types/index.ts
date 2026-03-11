@@ -90,4 +90,5 @@ export interface OciCacheStats {
   tag_count: number
   blob_count: number
   size_bytes: number
+  upstream: string
 }

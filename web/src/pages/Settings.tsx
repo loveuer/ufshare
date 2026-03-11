@@ -6,6 +6,7 @@ import {
 import StorageIcon from '@mui/icons-material/Storage'
 import FolderIcon from '@mui/icons-material/Folder'
 import TerminalIcon from '@mui/icons-material/Terminal'
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import { settingApi } from '../api'
 
 interface FieldConfig {
@@ -87,6 +88,41 @@ const MODULES: ModuleConfig[] = [
         label: 'Dedicated Listen Address',
         hint: 'Go clients point here directly: export GOPROXY=http://host:8081',
         placeholder: '0.0.0.0:8081',
+      },
+    ],
+  },
+  {
+    icon: <CloudDownloadIcon fontSize="small" />,
+    title: 'Docker',
+    enabledKey: 'oci.enabled',
+    enabledLabel: 'Enable dedicated port',
+    fields: [
+      {
+        key: 'oci.upstream',
+        label: 'Upstream Registry',
+        hint: 'Docker registry upstream for proxy/cache',
+        placeholder: 'https://registry-1.docker.io',
+        alwaysShow: true,
+      },
+      {
+        key: 'oci.http_proxy',
+        label: 'HTTP Proxy',
+        hint: 'HTTP proxy for upstream connections',
+        placeholder: 'http://proxy:8080',
+        alwaysShow: true,
+      },
+      {
+        key: 'oci.https_proxy',
+        label: 'HTTPS Proxy',
+        hint: 'HTTPS proxy for upstream connections',
+        placeholder: 'http://proxy:8080',
+        alwaysShow: true,
+      },
+      {
+        key: 'oci.addr',
+        label: 'Dedicated Listen Address',
+        hint: 'Docker clients point here directly',
+        placeholder: '0.0.0.0:5000',
       },
     ],
   },
