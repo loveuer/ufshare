@@ -19,6 +19,7 @@ import (
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
 	gosvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/goproxy"
 	npmsvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/npm"
+	ocisvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/oci"
 	"gitea.loveuer.com/loveuer/ufshare/v2/web"
 )
 
@@ -51,6 +52,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.NpmAddr, "npm-addr", "", "npm 专用端口（可选，如 0.0.0.0:4873）")
 	cmd.Flags().StringVar(&cfg.FileAddr, "file-addr", "", "file-store 专用端口（可选，如 0.0.0.0:8001）")
 	cmd.Flags().StringVar(&cfg.GoAddr, "go-addr", "", "go 模块代理专用端口（可选，如 0.0.0.0:8081）")
+	cmd.Flags().StringVar(&cfg.OciAddr, "oci-addr", "", "OCI/Docker 镜像代理专用端口（可选，如 0.0.0.0:5000）")
 
 	// 添加子命令
 	cmd.AddCommand(newInstallCmd())
@@ -78,6 +80,7 @@ func run(cfg *config.Config) error {
 	settingService := service.NewSettingService(db)
 	npmService     := npmsvc.New(db, cfg.Data, settingService)
 	goService      := gosvc.New(cfg.Data, settingService)
+	ociService     := ocisvc.New(db, cfg.Data, settingService)
 
 	if err := createDefaultAdmin(authService, userService); err != nil {
 		log.Printf("warning: failed to create default admin: %v", err)
@@ -88,6 +91,7 @@ func run(cfg *config.Config) error {
 	npmHandler  := handler.NewNpmHandler(npmService, authService)
 	fileHandler := handler.NewFileHandler(fileService)
 	goHandler   := handler.NewGoHandler(goService, authService)
+	ociHandler  := handler.NewOciHandler(ociService, authService)
 
 	npmDedicated := pkgserver.New("npm", cfg.BodySize, func(app *ursa.App) {
 		api.RegisterNpmRoutes(app, npmHandler, authService, "")
@@ -100,6 +104,9 @@ func run(cfg *config.Config) error {
 	})
 	goDedicated := pkgserver.New("go", cfg.BodySize, func(app *ursa.App) {
 		handler.RegisterGoRoutes(app, goHandler, authService, "")
+	})
+	ociDedicated := pkgserver.New("oci", cfg.BodySize, func(app *ursa.App) {
+		api.RegisterOciRoutes(app, ociHandler, authService, "")
 	})
 
 	// CLI flag 显式指定时强制覆盖 DB 中的值，保证每次启动 flag 均生效
@@ -116,6 +123,10 @@ func run(cfg *config.Config) error {
 		_ = settingService.Set(bgCtx, service.SettingGoAddr, cfg.GoAddr)
 		_ = settingService.Set(bgCtx, service.SettingGoEnabled, "true")
 	}
+	if cfg.OciAddr != "" {
+		_ = settingService.Set(bgCtx, service.SettingOciAddr, cfg.OciAddr)
+		_ = settingService.Set(bgCtx, service.SettingOciEnabled, "true")
+	}
 
 	// tryDedicated 根据 enabled + addr 决定启动/停止独立端口
 	tryDedicated := func(d *pkgserver.Dedicated, enabled bool, addr string) {
@@ -130,6 +141,7 @@ func run(cfg *config.Config) error {
 	tryDedicated(npmDedicated, settingService.GetNpmEnabled(), settingService.GetNpmAddr())
 	tryDedicated(fileDedicated, settingService.GetFileEnabled(), settingService.GetFileAddr())
 	tryDedicated(goDedicated, settingService.GetGoEnabled(), settingService.GetGoAddr())
+	tryDedicated(ociDedicated, settingService.GetOciEnabled(), settingService.GetOciAddr())
 
 	// 监听配置变更，动态热重启独立端口
 	settingService.OnChange(service.SettingNpmEnabled, func(_ string) {
@@ -150,10 +162,16 @@ func run(cfg *config.Config) error {
 	settingService.OnChange(service.SettingGoAddr, func(_ string) {
 		tryDedicated(goDedicated, settingService.GetGoEnabled(), settingService.GetGoAddr())
 	})
+	settingService.OnChange(service.SettingOciEnabled, func(_ string) {
+		tryDedicated(ociDedicated, settingService.GetOciEnabled(), settingService.GetOciAddr())
+	})
+	settingService.OnChange(service.SettingOciAddr, func(_ string) {
+		tryDedicated(ociDedicated, settingService.GetOciEnabled(), settingService.GetOciAddr())
+	})
 
 	// ── 主端口 ────────────────────────────────────────────────────────────────
 
-	router := api.NewRouter(authService, userService, fileService, npmService, settingService, web.FS())
+	router := api.NewRouter(authService, userService, fileService, npmService, ociService, settingService, web.FS())
 
 	appConfig := ursa.Config{BodyLimit: cfg.BodySize}
 	if spaHandler := router.SPAHandler(); spaHandler != nil {

@@ -66,3 +66,28 @@ export interface GoCacheStats {
   upstream: string
   goprivate: string
 }
+
+export interface OciRepository {
+  id: number
+  name: string
+  upstream: string
+  tag_count: number
+  cached_blob_count: number
+  total_size: number
+  updated_at: string
+}
+
+export interface OciTagInfo {
+  tag: string
+  manifest_digest: string
+  media_type: string
+  size: number
+  created_at: string
+}
+
+export interface OciCacheStats {
+  repo_count: number
+  tag_count: number
+  blob_count: number
+  size_bytes: number
+}

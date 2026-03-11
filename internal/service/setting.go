@@ -22,8 +22,15 @@ const (
 	SettingGoEnabled   = "go.enabled"
 	SettingGoAddr      = "go.addr"
 
+	SettingOciUpstream   = "oci.upstream"
+	SettingOciEnabled    = "oci.enabled"
+	SettingOciAddr       = "oci.addr"
+	SettingOciHttpProxy  = "oci.http_proxy"
+	SettingOciHttpsProxy = "oci.https_proxy"
+
 	DefaultNpmUpstream = "https://registry.npmmirror.com"
 	DefaultGoUpstream  = "https://goproxy.cn,direct"
+	DefaultOciUpstream = "https://registry-1.docker.io"
 )
 
 type SettingService struct {
@@ -162,6 +169,24 @@ func (s *SettingService) GetGoEnabled() bool {
 // GetGoAddr 返回 Go 模块代理专用端口监听地址，未配置时返回空字符串
 func (s *SettingService) GetGoAddr() string {
 	return s.Get(SettingGoAddr)
+}
+
+// GetOciUpstream 返回 OCI 代理上游地址
+func (s *SettingService) GetOciUpstream() string {
+	if v := s.Get(SettingOciUpstream); v != "" {
+		return v
+	}
+	return DefaultOciUpstream
+}
+
+// GetOciEnabled 返回 OCI 专用端口是否已启用
+func (s *SettingService) GetOciEnabled() bool {
+	return s.Get(SettingOciEnabled) == "true"
+}
+
+// GetOciAddr 返回 OCI 专用端口监听地址
+func (s *SettingService) GetOciAddr() string {
+	return s.Get(SettingOciAddr)
 }
 
 // GetAll 返回所有配置项（供设置页面展示，直接读 DB 保证数据最新）

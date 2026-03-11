@@ -16,6 +16,7 @@ import (
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/pkg/database"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
 	npmsvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/npm"
+	ocisvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/oci"
 )
 
 const (
@@ -49,6 +50,7 @@ func newTestServer(t *testing.T) *testServer {
 	fileSvc := service.NewFileService(db, dataDir)
 	settingSvc := service.NewSettingService(db)
 	npmSvc := npmsvc.New(db, dataDir, settingSvc)
+	ociSvc := ocisvc.New(db, dataDir, settingSvc)
 
 	// 创建管理员用户
 	bgCtx := context.Background()
@@ -71,7 +73,7 @@ func newTestServer(t *testing.T) *testServer {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	baseURL := "http://" + addr
 
-	router := api.NewRouter(authSvc, userSvc, fileSvc, npmSvc, settingSvc, nil)
+	router := api.NewRouter(authSvc, userSvc, fileSvc, npmSvc, ociSvc, settingSvc, nil)
 	app := ursa.New(ursa.Config{BodyLimit: -1})
 	router.Setup(app, nil)
 

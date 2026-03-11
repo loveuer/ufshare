@@ -11,6 +11,7 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import LockIcon from '@mui/icons-material/Lock'
 import ViewModuleIcon from '@mui/icons-material/ViewModule'
 import StorageIcon from '@mui/icons-material/Storage'
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import SettingsIcon from '@mui/icons-material/Settings'
 import { useAuth } from '../store/auth'
 import { authApi } from '../api'
@@ -21,6 +22,7 @@ const navItems = [
   { label: 'File Store', path: '/files', icon: <FolderIcon /> },
   { label: 'npm', path: '/npm', icon: <ViewModuleIcon /> },
   { label: 'Go Modules', path: '/go', icon: <StorageIcon /> },
+  { label: 'Docker', path: '/docker', icon: <CloudDownloadIcon /> },
   { label: 'Users', path: '/users', icon: <PeopleIcon /> },
   { label: 'Settings', path: '/settings', icon: <SettingsIcon /> },
 ]

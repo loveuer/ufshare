@@ -22,6 +22,7 @@ type Config struct {
 	NpmAddr  string        // npm 专用端口，如 0.0.0.0:4873（可选）
 	FileAddr string        // file-store 专用端口，如 0.0.0.0:8001（可选）
 	GoAddr   string        // go 模块代理专用端口，如 0.0.0.0:8081（可选）
+	OciAddr  string        // OCI/Docker 镜像代理专用端口，如 0.0.0.0:5000（可选）
 	BodySize int64         // 请求体大小限制（字节），-1 表示不限制
 	Database DatabaseConfig
 	JWT      JWTConfig

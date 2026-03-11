@@ -12,5 +12,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&NpmPackage{},
 		&NpmVersion{},
 		&Setting{},
+		&OciRepository{},
+		&OciTag{},
+		&OciManifest{},
+		&OciBlob{},
 	)
 }

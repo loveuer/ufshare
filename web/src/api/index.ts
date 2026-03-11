@@ -1,5 +1,5 @@
 import http from './http'
-import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion, GoCacheStats } from '../types'
+import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion, GoCacheStats, OciRepository, OciTagInfo, OciCacheStats } from '../types'
 
 // 认证
 export const authApi = {
@@ -47,4 +47,15 @@ export const npmApi = {
 export const goApi = {
   getStats: () => http.get<ApiResponse<GoCacheStats>>('/go/stats'),
   cleanCache: () => http.delete<ApiResponse<null>>('/go/cache'),
+}
+
+// OCI/Docker 镜像代理
+export const ociApi = {
+  listRepos: (page = 1, pageSize = 20, search = '') =>
+    http.get<ApiResponse<OciRepository[]>>('/oci/repositories', { params: { page, page_size: pageSize, search: search || undefined } }),
+  listTags: (name: string) =>
+    http.get<ApiResponse<OciTagInfo[]>>('/oci/repositories/tags', { params: { name } }),
+  deleteRepo: (id: number) => http.delete<ApiResponse<null>>(`/oci/repositories/${id}`),
+  getStats: () => http.get<ApiResponse<OciCacheStats>>('/oci/stats'),
+  cleanCache: () => http.delete<ApiResponse<null>>('/oci/cache'),
 }

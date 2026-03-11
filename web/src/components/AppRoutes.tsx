@@ -6,6 +6,7 @@ import UsersPage from '../pages/Users'
 import FilesPage from '../pages/Files'
 import NpmPage from '../pages/Npm'
 import GoPage from '../pages/Go'
+import DockerPage from '../pages/Docker'
 import SettingsPage from '../pages/Settings'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,7 @@ export default function AppRoutes() {
                 <Route path="files" element={<FilesPage />} />
                 <Route path="npm" element={<NpmPage />} />
                 <Route path="go" element={<GoPage />} />
+                <Route path="docker" element={<DockerPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Routes>
