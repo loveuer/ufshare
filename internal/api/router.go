@@ -10,6 +10,7 @@ import (
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/api/handler"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/api/middleware"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
+	mavensvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/maven"
 	npmsvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/npm"
 	ocisvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/oci"
 )
@@ -20,6 +21,7 @@ type Router struct {
 	fileService    *service.FileService
 	npmService     *npmsvc.Service
 	ociService     *ocisvc.Service
+	mavenService   *mavensvc.Service
 	settingService *service.SettingService
 	webFS          fs.FS
 	ociHandler     *handler.OciHandler // 缓存，供 SPAHandler 拦截 /v2/ 请求
@@ -31,6 +33,7 @@ func NewRouter(
 	fileService *service.FileService,
 	npmService *npmsvc.Service,
 	ociService *ocisvc.Service,
+	mavenService *mavensvc.Service,
 	settingService *service.SettingService,
 	webFS fs.FS,
 ) *Router {
@@ -40,6 +43,7 @@ func NewRouter(
 		fileService:    fileService,
 		npmService:     npmService,
 		ociService:     ociService,
+		mavenService:   mavenService,
 		settingService: settingService,
 		webFS:          webFS,
 		ociHandler:     handler.NewOciHandler(ociService, authService),
@@ -79,6 +83,7 @@ func (r *Router) Setup(app *ursa.App, goHandler *handler.GoHandler) {
 	fileHandler    := handler.NewFileHandler(r.fileService)
 	npmHandler     := handler.NewNpmHandler(r.npmService, r.authService)
 	ociHandler     := r.ociHandler
+	mavenHandler   := handler.NewMavenHandler(r.mavenService, r.authService)
 	settingHandler := handler.NewSettingHandler(r.settingService)
 
 	// ── REST API (/api/v1) ───────────────────────────────────────────────────
@@ -120,6 +125,11 @@ func (r *Router) Setup(app *ursa.App, goHandler *handler.GoHandler) {
 	ociAdmin.Get("/stats", ociHandler.GetStats)
 	ociAdmin.Delete("/cache", ociHandler.CleanCache)
 
+	// Maven 管理接口（供前端使用，需认证）
+	mavenAdmin := api.Group("/maven", middleware.Auth(r.authService))
+	mavenAdmin.Get("/artifacts", mavenHandler.ListArtifacts)
+	mavenAdmin.Get("/artifacts/detail", mavenHandler.GetArtifactDetail)
+
 	// ── file-store（主端口，带 /file-store 前缀）──────────────────────────────
 	RegisterFileRoutes(app, fileHandler, r.authService, "/file-store")
 
@@ -133,6 +143,9 @@ func (r *Router) Setup(app *ursa.App, goHandler *handler.GoHandler) {
 
 	// ── OCI registry（主端口，/v2/ 前缀）──────────────────────────────────────
 	RegisterOciRoutes(app, ociHandler, r.authService, "")
+
+	// ── Maven repository（主端口，/maven 前缀）─────────────────────────────────
+	RegisterMavenRoutes(app, mavenHandler, r.authService, "/maven")
 
 	// ── 前端静态文件 + SPA fallback（由 ursa.Config.NotFoundHandler 处理）──────
 }
@@ -173,6 +186,19 @@ func RegisterOciRoutes(app *ursa.App, ociHandler *handler.OciHandler, _ *service
 	app.Put(prefix+"/v2/*path", ociHandler.DispatchPut)
 	app.Post(prefix+"/v2/*path", ociHandler.DispatchPost)
 	app.Delete(prefix+"/v2/*path", ociHandler.DispatchDelete)
+}
+
+// RegisterMavenRoutes 注册 Maven 仓库路由
+// 路径格式: /maven/{group}/{artifact}/{version}/{filename}
+func RegisterMavenRoutes(app *ursa.App, mavenHandler *handler.MavenHandler, auth *service.AuthService, prefix string) {
+	// GET /maven/*path - 下载制品（公开）
+	app.Get(prefix+"/*path", mavenHandler.GetArtifact)
+	// HEAD /maven/*path - 检查文件是否存在（公开）
+	app.Head(prefix+"/*path", mavenHandler.HeadArtifact)
+	// PUT /maven/*path - 上传制品（需认证）
+	app.Put(prefix+"/*path", middleware.Auth(auth), mavenHandler.PutArtifact)
+	// DELETE /maven/*path - 删除制品（需认证）
+	app.Delete(prefix+"/*path", middleware.Auth(auth), mavenHandler.DeleteArtifact)
 }
 
 // RegisterFileRoutes 在 app 上以 prefix 为前缀注册 file-store 路由。

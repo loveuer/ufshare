@@ -28,9 +28,14 @@ const (
 	SettingOciHttpProxy  = "oci.http_proxy"
 	SettingOciHttpsProxy = "oci.https_proxy"
 
-	DefaultNpmUpstream = "https://registry.npmmirror.com"
-	DefaultGoUpstream  = "https://goproxy.cn,direct"
-	DefaultOciUpstream = "https://registry-1.docker.io"
+	SettingMavenUpstream = "maven.upstream"
+	SettingMavenEnabled  = "maven.enabled"
+	SettingMavenAddr     = "maven.addr"
+
+	DefaultNpmUpstream   = "https://registry.npmmirror.com"
+	DefaultGoUpstream    = "https://goproxy.cn,direct"
+	DefaultOciUpstream   = "https://registry-1.docker.io"
+	DefaultMavenUpstream = "https://repo.maven.apache.org/maven2"
 )
 
 type SettingService struct {
@@ -187,6 +192,24 @@ func (s *SettingService) GetOciEnabled() bool {
 // GetOciAddr 返回 OCI 专用端口监听地址
 func (s *SettingService) GetOciAddr() string {
 	return s.Get(SettingOciAddr)
+}
+
+// GetMavenUpstream 返回 Maven 代理上游地址
+func (s *SettingService) GetMavenUpstream() string {
+	if v := s.Get(SettingMavenUpstream); v != "" {
+		return v
+	}
+	return DefaultMavenUpstream
+}
+
+// GetMavenEnabled 返回 Maven 专用端口是否已启用
+func (s *SettingService) GetMavenEnabled() bool {
+	return s.Get(SettingMavenEnabled) == "true"
+}
+
+// GetMavenAddr 返回 Maven 专用端口监听地址
+func (s *SettingService) GetMavenAddr() string {
+	return s.Get(SettingMavenAddr)
 }
 
 // GetAll 返回所有配置项（供设置页面展示，直接读 DB 保证数据最新）

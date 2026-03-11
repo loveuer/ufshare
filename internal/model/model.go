@@ -16,5 +16,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&OciTag{},
 		&OciManifest{},
 		&OciBlob{},
+		&MavenRepository{},
+		&MavenArtifact{},
+		&MavenArtifactFile{},
+		&MavenMetadata{},
 	)
 }

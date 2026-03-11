@@ -18,6 +18,7 @@ import (
 	pkgserver "gitea.loveuer.com/loveuer/ufshare/v2/internal/pkg/server"
 	"gitea.loveuer.com/loveuer/ufshare/v2/internal/service"
 	gosvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/goproxy"
+	mavensvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/maven"
 	npmsvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/npm"
 	ocisvc "gitea.loveuer.com/loveuer/ufshare/v2/internal/service/oci"
 	"gitea.loveuer.com/loveuer/ufshare/v2/web"
@@ -53,6 +54,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.FileAddr, "file-addr", "", "file-store 专用端口（可选，如 0.0.0.0:8001）")
 	cmd.Flags().StringVar(&cfg.GoAddr, "go-addr", "", "go 模块代理专用端口（可选，如 0.0.0.0:8081）")
 	cmd.Flags().StringVar(&cfg.OciAddr, "oci-addr", "", "OCI/Docker 镜像代理专用端口（可选，如 0.0.0.0:5000）")
+	cmd.Flags().StringVar(&cfg.MavenAddr, "maven-addr", "", "Maven 仓库专用端口（可选，如 0.0.0.0:8082）")
 
 	// 添加子命令
 	cmd.AddCommand(newInstallCmd())
@@ -81,6 +83,7 @@ func run(cfg *config.Config) error {
 	npmService     := npmsvc.New(db, cfg.Data, settingService)
 	goService      := gosvc.New(cfg.Data, settingService)
 	ociService     := ocisvc.New(db, cfg.Data, settingService)
+	mavenService   := mavensvc.New(db, cfg.Data, settingService)
 
 	if err := createDefaultAdmin(authService, userService); err != nil {
 		log.Printf("warning: failed to create default admin: %v", err)
@@ -88,10 +91,11 @@ func run(cfg *config.Config) error {
 
 	// ── 独立端口服务器 ─────────────────────────────────────────────────────────
 
-	npmHandler  := handler.NewNpmHandler(npmService, authService)
-	fileHandler := handler.NewFileHandler(fileService)
-	goHandler   := handler.NewGoHandler(goService, authService)
-	ociHandler  := handler.NewOciHandler(ociService, authService)
+	npmHandler   := handler.NewNpmHandler(npmService, authService)
+	fileHandler  := handler.NewFileHandler(fileService)
+	goHandler    := handler.NewGoHandler(goService, authService)
+	ociHandler   := handler.NewOciHandler(ociService, authService)
+	mavenHandler := handler.NewMavenHandler(mavenService, authService)
 
 	npmDedicated := pkgserver.New("npm", cfg.BodySize, func(app *ursa.App) {
 		api.RegisterNpmRoutes(app, npmHandler, authService, "")
@@ -107,6 +111,9 @@ func run(cfg *config.Config) error {
 	})
 	ociDedicated := pkgserver.New("oci", cfg.BodySize, func(app *ursa.App) {
 		api.RegisterOciRoutes(app, ociHandler, authService, "")
+	})
+	mavenDedicated := pkgserver.New("maven", cfg.BodySize, func(app *ursa.App) {
+		api.RegisterMavenRoutes(app, mavenHandler, authService, "")
 	})
 
 	// CLI flag 显式指定时强制覆盖 DB 中的值，保证每次启动 flag 均生效
@@ -127,6 +134,10 @@ func run(cfg *config.Config) error {
 		_ = settingService.Set(bgCtx, service.SettingOciAddr, cfg.OciAddr)
 		_ = settingService.Set(bgCtx, service.SettingOciEnabled, "true")
 	}
+	if cfg.MavenAddr != "" {
+		_ = settingService.Set(bgCtx, service.SettingMavenAddr, cfg.MavenAddr)
+		_ = settingService.Set(bgCtx, service.SettingMavenEnabled, "true")
+	}
 
 	// tryDedicated 根据 enabled + addr 决定启动/停止独立端口
 	tryDedicated := func(d *pkgserver.Dedicated, enabled bool, addr string) {
@@ -142,6 +153,7 @@ func run(cfg *config.Config) error {
 	tryDedicated(fileDedicated, settingService.GetFileEnabled(), settingService.GetFileAddr())
 	tryDedicated(goDedicated, settingService.GetGoEnabled(), settingService.GetGoAddr())
 	tryDedicated(ociDedicated, settingService.GetOciEnabled(), settingService.GetOciAddr())
+	tryDedicated(mavenDedicated, settingService.GetMavenEnabled(), settingService.GetMavenAddr())
 
 	// 监听配置变更，动态热重启独立端口
 	settingService.OnChange(service.SettingNpmEnabled, func(_ string) {
@@ -168,10 +180,16 @@ func run(cfg *config.Config) error {
 	settingService.OnChange(service.SettingOciAddr, func(_ string) {
 		tryDedicated(ociDedicated, settingService.GetOciEnabled(), settingService.GetOciAddr())
 	})
+	settingService.OnChange(service.SettingMavenEnabled, func(_ string) {
+		tryDedicated(mavenDedicated, settingService.GetMavenEnabled(), settingService.GetMavenAddr())
+	})
+	settingService.OnChange(service.SettingMavenAddr, func(_ string) {
+		tryDedicated(mavenDedicated, settingService.GetMavenEnabled(), settingService.GetMavenAddr())
+	})
 
 	// ── 主端口 ────────────────────────────────────────────────────────────────
 
-	router := api.NewRouter(authService, userService, fileService, npmService, ociService, settingService, web.FS())
+	router := api.NewRouter(authService, userService, fileService, npmService, ociService, mavenService, settingService, web.FS())
 
 	appConfig := ursa.Config{BodyLimit: cfg.BodySize}
 	if spaHandler := router.SPAHandler(); spaHandler != nil {
