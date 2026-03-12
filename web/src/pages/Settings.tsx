@@ -7,6 +7,7 @@ import StorageIcon from '@mui/icons-material/Storage'
 import FolderIcon from '@mui/icons-material/Folder'
 import TerminalIcon from '@mui/icons-material/Terminal'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
+import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import { settingApi } from '../api'
 
 interface FieldConfig {
@@ -123,6 +124,27 @@ const MODULES: ModuleConfig[] = [
         label: 'Dedicated Listen Address',
         hint: 'Docker clients point here directly',
         placeholder: '0.0.0.0:5000',
+      },
+    ],
+  },
+  {
+    icon: <AccountTreeIcon fontSize="small" />,
+    title: 'Maven',
+    enabledKey: 'maven.enabled',
+    enabledLabel: 'Enable dedicated port',
+    fields: [
+      {
+        key: 'maven.upstream',
+        label: 'Upstream Repository',
+        hint: 'Maven repository upstream for proxy/cache',
+        placeholder: 'https://repo.maven.apache.org/maven2',
+        alwaysShow: true,
+      },
+      {
+        key: 'maven.addr',
+        label: 'Dedicated Listen Address',
+        hint: 'Maven clients point here directly',
+        placeholder: '0.0.0.0:8082',
       },
     ],
   },

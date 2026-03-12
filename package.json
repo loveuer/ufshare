@@ -1,0 +1,27 @@
+{
+  "name": "ufshare",
+  "version": "1.0.0",
+  "description": "轻量级制品仓库管理系统，类似 JFrog Artifactory 的开源替代方案。",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/loveuer/ufshare.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/loveuer/ufshare/issues"
+  },
+  "homepage": "https://github.com/loveuer/ufshare#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

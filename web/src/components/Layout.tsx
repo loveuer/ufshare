@@ -15,6 +15,7 @@ import StorageIcon from '@mui/icons-material/Storage'
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import SettingsIcon from '@mui/icons-material/Settings'
 import AccountCircleIcon from '@mui/icons-material/AccountCircle'
+import MavenIcon from '@mui/icons-material/AccountTree'
 import { useAuth } from '../store/auth'
 import { authApi } from '../api'
 
@@ -25,6 +26,7 @@ const navItems = [
   { label: 'npm', path: '/npm', icon: <ViewModuleIcon /> },
   { label: 'Go Modules', path: '/go', icon: <StorageIcon /> },
   { label: 'Docker', path: '/docker', icon: <CloudDownloadIcon /> },
+  { label: 'Maven', path: '/maven', icon: <MavenIcon /> },
   { label: 'Users', path: '/users', icon: <PeopleIcon /> },
   { label: 'Settings', path: '/settings', icon: <SettingsIcon /> },
 ]

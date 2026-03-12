@@ -7,6 +7,7 @@ import FilesPage from '../pages/Files'
 import NpmPage from '../pages/Npm'
 import GoPage from '../pages/Go'
 import DockerPage from '../pages/Docker'
+import MavenPage from '../pages/Maven'
 import SettingsPage from '../pages/Settings'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -29,6 +30,7 @@ export default function AppRoutes() {
                 <Route path="npm" element={<NpmPage />} />
                 <Route path="go" element={<GoPage />} />
                 <Route path="docker" element={<DockerPage />} />
+                <Route path="maven" element={<MavenPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Routes>

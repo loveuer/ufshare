@@ -95,3 +95,49 @@ export interface OciCacheStats {
   size_bytes: number
   upstream: string
 }
+
+export interface MavenRepository {
+  id: number
+  name: string
+  upstream: string
+  enabled: boolean
+  description: string
+  storage_path: string
+}
+
+export interface MavenArtifact {
+  id: number
+  created_at: string
+  updated_at: string
+  group_id: string
+  artifact_id: string
+  version: string
+  is_snapshot: boolean
+  is_uploaded: boolean
+  uploader_id: number
+  uploader: string
+  files?: MavenArtifactFile[]
+}
+
+export interface MavenArtifactFile {
+  id: number
+  created_at: string
+  filename: string
+  path: string
+  size: number
+  checksum: string
+  classifier: string
+  extension: string
+  cached: boolean
+  is_uploaded: boolean
+}
+
+export interface MavenRepositoryConfig {
+  name: string
+  url: string
+  enabled: boolean
+  priority: number
+  is_private: boolean
+  username?: string
+  password?: string
+}

@@ -1,5 +1,5 @@
 import http from './http'
-import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion, GoCacheStats, OciRepository, OciTagInfo, OciCacheStats } from '../types'
+import type { ApiResponse, LoginResponse, PageData, User, NpmPackage, NpmVersion, GoCacheStats, OciRepository, OciTagInfo, OciCacheStats, MavenArtifact, MavenRepository, MavenRepositoryConfig } from '../types'
 
 // 认证
 export const authApi = {
@@ -58,4 +58,24 @@ export const ociApi = {
   deleteRepo: (id: number) => http.delete<ApiResponse<null>>(`/oci/repositories/${id}`),
   getStats: () => http.get<ApiResponse<OciCacheStats>>('/oci/stats'),
   cleanCache: () => http.delete<ApiResponse<null>>('/oci/cache'),
+}
+
+// Maven 仓库
+export const mavenApi = {
+  listArtifacts: (page = 1, pageSize = 20, groupId = '', artifactId = '') =>
+    http.get<ApiResponse<MavenArtifact[]>>('/maven/artifacts', { params: { page, page_size: pageSize, group_id: groupId || undefined, artifact_id: artifactId || undefined } }),
+  searchArtifacts: (q = '', page = 1, pageSize = 20) =>
+    http.get<ApiResponse<MavenArtifact[]>>('/maven/artifacts/search', { params: { q, page, page_size: pageSize } }),
+  getVersions: (groupId: string, artifactId: string) =>
+    http.get<ApiResponse<string[]>>('/maven/artifacts/versions', { params: { group_id: groupId, artifact_id: artifactId } }),
+  getArtifactDetail: (groupId: string, artifactId: string, version: string) =>
+    http.get<ApiResponse<MavenArtifact>>('/maven/artifacts/detail', { params: { group_id: groupId, artifact_id: artifactId, version } }),
+  listRepositories: () =>
+    http.get<ApiResponse<MavenRepository[]>>('/maven/repositories'),
+  addRepository: (data: MavenRepositoryConfig) =>
+    http.post<ApiResponse<MavenRepository>>('/maven/repositories', data),
+  updateRepository: (id: number, data: MavenRepositoryConfig) =>
+    http.put<ApiResponse<null>>(`/maven/repositories/${id}`, data),
+  deleteRepository: (id: number) =>
+    http.delete<ApiResponse<null>>(`/maven/repositories/${id}`),
 }
