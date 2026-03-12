@@ -128,7 +128,13 @@ func (r *Router) Setup(app *ursa.App, goHandler *handler.GoHandler) {
 	// Maven 管理接口（供前端使用，需认证）
 	mavenAdmin := api.Group("/maven", middleware.Auth(r.authService))
 	mavenAdmin.Get("/artifacts", mavenHandler.ListArtifacts)
+	mavenAdmin.Get("/artifacts/search", mavenHandler.SearchArtifacts)
+	mavenAdmin.Get("/artifacts/versions", mavenHandler.GetVersions)
 	mavenAdmin.Get("/artifacts/detail", mavenHandler.GetArtifactDetail)
+	mavenAdmin.Get("/repositories", mavenHandler.ListRepositories)
+	mavenAdmin.Post("/repositories", mavenHandler.AddRepository)
+	mavenAdmin.Put("/repositories/:id", mavenHandler.UpdateRepository)
+	mavenAdmin.Delete("/repositories/:id", mavenHandler.DeleteRepository)
 
 	// ── file-store（主端口，带 /file-store 前缀）──────────────────────────────
 	RegisterFileRoutes(app, fileHandler, r.authService, "/file-store")

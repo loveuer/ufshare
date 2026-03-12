@@ -36,6 +36,9 @@ type MavenArtifact struct {
 	ArtifactID string `json:"artifact_id" gorm:"index;size:256;not null"` // 如 myapp
 	Version    string `json:"version" gorm:"index;size:128;not null"`     // 如 1.0.0
 
+	// 是否是 SNAPSHOT 版本
+	IsSnapshot bool `json:"is_snapshot" gorm:"default:false;index"`
+
 	// 所属仓库
 	RepositoryID uint            `json:"repository_id" gorm:"index;not null"`
 	Repository   MavenRepository `json:"-" gorm:"foreignKey:RepositoryID"`
@@ -107,3 +110,27 @@ type MavenMetadata struct {
 }
 
 func (MavenMetadata) TableName() string { return "maven_metadata" }
+
+// MavenSnapshotMetadata SNAPSHOT 版本元数据（maven-metadata.xml 中的 snapshot 部分）
+type MavenSnapshotMetadata struct {
+	ID        uint           `json:"id" gorm:"primarykey"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+
+	// GAV 坐标
+	GroupID    string `json:"group_id" gorm:"index;size:256;not null"`
+	ArtifactID string `json:"artifact_id" gorm:"index;size:256;not null"`
+	Version    string `json:"version" gorm:"index;size:128;not null"` // SNAPSHOT 版本号，如 1.0.0-SNAPSHOT
+
+	// 时间戳版本信息（如 1.0.0-20240311.123456-1）
+	Timestamp   string `json:"timestamp" gorm:"size:20"` // 如 20240311.123456
+	BuildNumber int    `json:"build_number"`             // 构建号，如 1
+
+	// 文件列表（JSON 数组，记录该 SNAPSHOT 的所有文件）
+	FilesJSON string `json:"-" gorm:"column:files;type:text"`
+
+	// 最后更新时间
+	LastUpdated string `json:"last_updated" gorm:"size:20"` // yyyyMMddHHmmss 格式
+}
+
+func (MavenSnapshotMetadata) TableName() string { return "maven_snapshot_metadata" }

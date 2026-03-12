@@ -41,8 +41,19 @@ func (h *MavenHandler) GetArtifact(c *ursa.Ctx) error {
 		return h.getMetadata(c, path)
 	}
 
-	// 获取文件
-	reader, size, localPath, err := h.service.GetArtifactFile(c.Request.Context(), path)
+	// 解析 GAV
+	groupID, artifactID, version, filename, err := parseMavenPath(path)
+	if err != nil {
+		return c.Status(http.StatusBadRequest).SendString(err.Error())
+	}
+
+	// 检查是否是 SNAPSHOT 版本
+	if maven.IsSnapshotVersion(version) {
+		return h.getSnapshotArtifact(c, groupID, artifactID, version, filename)
+	}
+
+	// 获取文件（使用多仓库回退）
+	reader, size, localPath, err := h.service.GetArtifactFileWithFallback(c.Request.Context(), path)
 	if err != nil {
 		if err == maven.ErrFileNotFound {
 			return c.Status(http.StatusNotFound).SendString("Not found")
@@ -61,6 +72,56 @@ func (h *MavenHandler) GetArtifact(c *ursa.Ctx) error {
 	return err
 }
 
+// getSnapshotArtifact 获取 SNAPSHOT 版本文件
+func (h *MavenHandler) getSnapshotArtifact(c *ursa.Ctx, groupID, artifactID, version, filename string) error {
+	// 检查是否是 metadata 请求
+	if filename == "maven-metadata.xml" {
+		return h.getSnapshotMetadata(c, groupID, artifactID, version)
+	}
+
+	// 获取 SNAPSHOT 文件
+	reader, size, localPath, err := h.service.GetSnapshotFile(c.Request.Context(), groupID, artifactID, version, filename)
+	if err != nil {
+		if err == maven.ErrFileNotFound {
+			return c.Status(http.StatusNotFound).SendString("Not found")
+		}
+		return c.Status(http.StatusInternalServerError).SendString(err.Error())
+	}
+	defer reader.Close()
+
+	// 设置 Content-Type
+	contentType := detectContentType(localPath)
+	c.Set("Content-Type", contentType)
+	c.Set("Content-Length", strconv.FormatInt(size, 10))
+
+	// 传输文件
+	_, err = io.Copy(c.Writer, reader)
+	return err
+}
+
+// getSnapshotMetadata 获取 SNAPSHOT metadata
+func (h *MavenHandler) getSnapshotMetadata(c *ursa.Ctx, groupID, artifactID, version string) error {
+	reader, size, err := h.service.GetSnapshotMetadata(c.Request.Context(), groupID, artifactID, version)
+	if err != nil {
+		// 尝试生成本地 metadata
+		data, genErr := h.service.GenerateSnapshotMetadata(c.Request.Context(), groupID, artifactID, version)
+		if genErr != nil {
+			return c.Status(http.StatusNotFound).SendString("Not found")
+		}
+		c.Set("Content-Type", "application/xml")
+		c.Set("Content-Length", strconv.Itoa(len(data)))
+		_, err = c.Writer.Write(data)
+		return err
+	}
+	defer reader.Close()
+
+	c.Set("Content-Type", "application/xml")
+	c.Set("Content-Length", strconv.FormatInt(size, 10))
+
+	_, err = io.Copy(c.Writer, reader)
+	return err
+}
+
 // getMetadata 获取 maven-metadata.xml
 func (h *MavenHandler) getMetadata(c *ursa.Ctx, path string) error {
 	// 解析路径获取 groupId 和 artifactId
@@ -74,12 +135,21 @@ func (h *MavenHandler) getMetadata(c *ursa.Ctx, path string) error {
 	groupParts := parts[:len(parts)-1]
 	groupID := strings.Join(groupParts, ".")
 
-	reader, size, err := h.service.GetMetadata(c.Request.Context(), groupID, artifactID)
+	// 使用多仓库回退获取 metadata
+	reader, size, err := h.service.GetMetadataWithFallback(c.Request.Context(), groupID, artifactID)
 	if err != nil {
-		if err == maven.ErrArtifactNotFound {
-			return c.Status(http.StatusNotFound).SendString("Not found")
+		// 尝试生成本地 metadata
+		data, genErr := h.service.GenerateMetadata(c.Request.Context(), groupID, artifactID)
+		if genErr != nil {
+			if err == maven.ErrArtifactNotFound {
+				return c.Status(http.StatusNotFound).SendString("Not found")
+			}
+			return c.Status(http.StatusInternalServerError).SendString(err.Error())
 		}
-		return c.Status(http.StatusInternalServerError).SendString(err.Error())
+		c.Set("Content-Type", "application/xml")
+		c.Set("Content-Length", strconv.Itoa(len(data)))
+		_, err = c.Writer.Write(data)
+		return err
 	}
 	defer reader.Close()
 
@@ -135,11 +205,18 @@ func (h *MavenHandler) PutArtifact(c *ursa.Ctx) error {
 		Uploader:   username,
 	}
 
-	if err := h.service.UploadFile(c.Request.Context(), opts, c.Request.Body); err != nil {
-		if err == maven.ErrVersionExists {
-			return c.Status(http.StatusConflict).SendString("Version already exists")
+	// 检查是否是 SNAPSHOT 版本
+	if maven.IsSnapshotVersion(version) {
+		if err := h.service.UploadSnapshot(c.Request.Context(), opts, c.Request.Body); err != nil {
+			return c.Status(http.StatusInternalServerError).SendString(err.Error())
 		}
-		return c.Status(http.StatusInternalServerError).SendString(err.Error())
+	} else {
+		if err := h.service.UploadFile(c.Request.Context(), opts, c.Request.Body); err != nil {
+			if err == maven.ErrVersionExists {
+				return c.Status(http.StatusConflict).SendString("Version already exists")
+			}
+			return c.Status(http.StatusInternalServerError).SendString(err.Error())
+		}
 	}
 
 	// 如果是 POM 文件上传，更新 metadata
@@ -248,12 +325,12 @@ func (h *MavenHandler) ListArtifacts(c *ursa.Ctx) error {
 
 	artifacts, total, err := h.service.ListArtifacts(c.Request.Context(), groupID, artifactID, page, pageSize)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(map[string]interface{}{
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
 			"error": err.Error(),
 		})
 	}
 
-	return c.JSON(map[string]interface{}{
+	return c.JSON(ursa.Map{
 		"data":      artifacts,
 		"total":     total,
 		"page":      page,
@@ -268,7 +345,7 @@ func (h *MavenHandler) GetArtifactDetail(c *ursa.Ctx) error {
 	version := c.Query("version")
 
 	if groupID == "" || artifactID == "" || version == "" {
-		return c.Status(http.StatusBadRequest).JSON(map[string]interface{}{
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
 			"error": "group_id, artifact_id and version are required",
 		})
 	}
@@ -276,16 +353,154 @@ func (h *MavenHandler) GetArtifactDetail(c *ursa.Ctx) error {
 	artifact, err := h.service.GetArtifact(c.Request.Context(), groupID, artifactID, version)
 	if err != nil {
 		if err == maven.ErrArtifactNotFound {
-			return c.Status(http.StatusNotFound).JSON(map[string]interface{}{
+			return c.Status(http.StatusNotFound).JSON(ursa.Map{
 				"error": "Artifact not found",
 			})
 		}
-		return c.Status(http.StatusInternalServerError).JSON(map[string]interface{}{
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
 			"error": err.Error(),
 		})
 	}
 
 	return c.JSON(artifact)
+}
+
+// SearchArtifacts 搜索制品（管理接口）
+func (h *MavenHandler) SearchArtifacts(c *ursa.Ctx) error {
+	query := c.Query("q")
+	page, _ := strconv.Atoi(c.Query("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	artifacts, total, err := h.service.SearchArtifacts(c.Request.Context(), query, page, pageSize)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(ursa.Map{
+		"data":      artifacts,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+// GetVersions 获取制品的所有版本（管理接口）
+func (h *MavenHandler) GetVersions(c *ursa.Ctx) error {
+	groupID := c.Query("group_id")
+	artifactID := c.Query("artifact_id")
+
+	if groupID == "" || artifactID == "" {
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
+			"error": "group_id and artifact_id are required",
+		})
+	}
+
+	versions, err := h.service.GetVersions(c.Request.Context(), groupID, artifactID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(ursa.Map{
+		"group_id":    groupID,
+		"artifact_id": artifactID,
+		"versions":    versions,
+	})
+}
+
+// ListRepositories 列出 Maven 仓库（管理接口）
+func (h *MavenHandler) ListRepositories(c *ursa.Ctx) error {
+	repos, err := h.service.GetRepositories(c.Request.Context())
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(ursa.Map{
+		"data": repos,
+	})
+}
+
+// AddRepository 添加 Maven 仓库（管理接口）
+func (h *MavenHandler) AddRepository(c *ursa.Ctx) error {
+	var config maven.RepositoryConfig
+	if err := c.BodyParser(&config); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if config.Name == "" || config.URL == "" {
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
+			"error": "name and url are required",
+		})
+	}
+
+	repo, err := h.service.AddRepository(c.Request.Context(), config)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(repo)
+}
+
+// UpdateRepository 更新 Maven 仓库（管理接口）
+func (h *MavenHandler) UpdateRepository(c *ursa.Ctx) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
+			"error": "Invalid repository ID",
+		})
+	}
+
+	var config maven.RepositoryConfig
+	if err := c.BodyParser(&config); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	if err := h.service.UpdateRepository(c.Request.Context(), uint(id), config); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(ursa.Map{
+		"message": "Repository updated",
+	})
+}
+
+// DeleteRepository 删除 Maven 仓库（管理接口）
+func (h *MavenHandler) DeleteRepository(c *ursa.Ctx) error {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(ursa.Map{
+			"error": "Invalid repository ID",
+		})
+	}
+
+	if err := h.service.DeleteRepository(c.Request.Context(), uint(id)); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(ursa.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(ursa.Map{
+		"message": "Repository deleted",
+	})
 }
 
 // resolveAuth 解析认证信息

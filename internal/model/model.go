@@ -20,5 +20,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&MavenArtifact{},
 		&MavenArtifactFile{},
 		&MavenMetadata{},
+		&MavenSnapshotMetadata{},
 	)
 }
