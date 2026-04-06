@@ -235,8 +235,23 @@ func serveFile(w http.ResponseWriter, r *http.Request, baseDir, filename string)
 
 func servePreview(w http.ResponseWriter, r *http.Request, fullPath, relPath string) {
 	ext := strings.ToLower(filepath.Ext(relPath))
-	switch ext {
-	case ".pdf", ".md":
+	textExts := map[string]bool{
+		".txt": true, ".log": true, ".csv": true,
+		".json": true, ".yaml": true, ".yml": true, ".toml": true,
+		".xml": true, ".html": true, ".htm": true,
+		".js": true, ".ts": true, ".jsx": true, ".tsx": true,
+		".py": true, ".go": true, ".rb": true, ".rs": true,
+		".java": true, ".c": true, ".cpp": true, ".h": true, ".hpp": true,
+		".sh": true, ".bash": true, ".zsh": true,
+		".css": true, ".scss": true, ".less": true,
+		".sql": true, ".ini": true, ".conf": true, ".env": true,
+		".md": true,
+	}
+	switch {
+	case ext == ".pdf" ||
+		ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" || ext == ".svg" ||
+		ext == ".mp4" || ext == ".webm" ||
+		ext == ".mp3" || ext == ".wav" || ext == ".flac" || ext == ".ogg":
 		f, err := os.Open(fullPath)
 		if err != nil {
 			http.NotFound(w, r)
@@ -248,9 +263,21 @@ func servePreview(w http.ResponseWriter, r *http.Request, fullPath, relPath stri
 			http.Error(w, "文件错误", http.StatusInternalServerError)
 			return
 		}
-		if ext == ".md" {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", "inline")
+		http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+	case textExts[ext]:
+		f, err := os.Open(fullPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
 		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			http.Error(w, "文件错误", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", "inline")
 		http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 	default:

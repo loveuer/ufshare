@@ -250,7 +250,20 @@
         </div>
     </div>
     <script>
-        const PREVIEWABLE = new Set(['pdf', 'md']);
+        const PREVIEWABLE = new Set([
+            'pdf', 'md',
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg',
+            'mp4', 'webm',
+            'mp3', 'wav', 'flac', 'ogg',
+            'txt', 'log', 'csv',
+            'json', 'yaml', 'yml', 'toml',
+            'xml', 'html', 'htm',
+            'js', 'ts', 'jsx', 'tsx',
+            'py', 'go', 'rb', 'rs', 'java', 'c', 'cpp', 'h', 'hpp',
+            'sh', 'bash', 'zsh',
+            'css', 'scss', 'less',
+            'sql', 'ini', 'conf', 'env',
+        ]);
 
         function getFileIcon(filename, isDir) {
             if (isDir) return '📁';
