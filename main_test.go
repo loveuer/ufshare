@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,16 @@ func putRequest(path, token, body string) *http.Request {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return req
+}
+
+func decodeUploadResponse(t *testing.T, rec *httptest.ResponseRecorder) uploadResponse {
+	t.Helper()
+
+	var resp uploadResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode upload response: %v; body: %s", err, rec.Body.String())
+	}
+	return resp
 }
 
 func TestValidateUploadToken(t *testing.T) {
@@ -70,8 +81,15 @@ func TestUploadCreatesParentDirsAndOverwrites(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	handleRequest(rec, putRequest("/a/b/file.txt", testToken, "first"), baseDir, false, testToken)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want %d", rec.Code, http.StatusCreated)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	resp := decodeUploadResponse(t, rec)
+	if resp.Status != http.StatusOK || resp.Action != "uploaded" {
+		t.Fatalf("response = %+v, want status 200 and action uploaded", resp)
+	}
+	if resp.File.Name != "file.txt" || resp.File.Path != "a/b/file.txt" || resp.File.URL != "http://example.com/a/b/file.txt" || resp.File.Size != 5 {
+		t.Fatalf("file response = %+v", resp.File)
 	}
 	content, err := os.ReadFile(target)
 	if err != nil {
@@ -83,8 +101,15 @@ func TestUploadCreatesParentDirsAndOverwrites(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	handleRequest(rec, putRequest("/a/b/file.txt", testToken, "second"), baseDir, false, testToken)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("overwrite status = %d, want %d", rec.Code, http.StatusCreated)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overwrite status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	resp = decodeUploadResponse(t, rec)
+	if resp.Status != http.StatusOK || resp.Action != "updated" {
+		t.Fatalf("response = %+v, want status 200 and action updated", resp)
+	}
+	if resp.File.Size != 6 {
+		t.Fatalf("file size = %d, want %d", resp.File.Size, 6)
 	}
 	content, err = os.ReadFile(target)
 	if err != nil {
@@ -120,8 +145,26 @@ func TestUploadHiddenPathRespectsHiddenFlag(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	handleRequest(rec, putRequest("/.env", testToken, "secret"), baseDir, true, testToken)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("hidden enabled status = %d, want %d", rec.Code, http.StatusCreated)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("hidden enabled status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestUploadResponseUsesForwardedURL(t *testing.T) {
+	baseDir := t.TempDir()
+	req := putRequest("/file%20name.txt?ignored=1", testToken, "content")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-Host", "files.example.test")
+	rec := httptest.NewRecorder()
+
+	handleRequest(rec, req, baseDir, false, testToken)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	resp := decodeUploadResponse(t, rec)
+	if resp.File.URL != "https://files.example.test/file%20name.txt" {
+		t.Fatalf("url = %q", resp.File.URL)
 	}
 }
 

@@ -39,6 +39,25 @@ curl -T ./local-file.txt \
   --location "http://127.0.0.1:8000/uploaded-file.txt"
 ```
 
+Successful uploads return JSON:
+
+```json
+{
+  "status": 200,
+  "action": "uploaded",
+  "file": {
+    "name": "uploaded-file.txt",
+    "path": "uploaded-file.txt",
+    "url": "http://127.0.0.1:8000/uploaded-file.txt",
+    "size": 123,
+    "mod_time": "2026-04-29T02:45:00-07:00"
+  }
+}
+```
+
+`action` is `uploaded` for new files and `updated` when replacing an existing
+file. `file.url` can be used directly with `wget`.
+
 Uploading to a nested path creates missing parent directories. Uploading to an
 existing file replaces it.
 

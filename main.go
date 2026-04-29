@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/subtle"
 	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,20 @@ import (
 
 //go:embed templates/index.html
 var htmlTemplate string
+
+type uploadResponse struct {
+	Status int                `json:"status"`
+	Action string             `json:"action"`
+	File   uploadResponseFile `json:"file"`
+}
+
+type uploadResponseFile struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	URL     string `json:"url"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+}
 
 func main() {
 	host := flag.String("host", "0.0.0.0", "监听主机")
@@ -160,9 +175,13 @@ func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHi
 		return
 	}
 
-	if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
-		http.Error(w, "上传目标不能是目录", http.StatusBadRequest)
-		return
+	action := "uploaded"
+	if info, err := os.Stat(fullPath); err == nil {
+		if info.IsDir() {
+			http.Error(w, "上传目标不能是目录", http.StatusBadRequest)
+			return
+		}
+		action = "updated"
 	} else if err != nil && !os.IsNotExist(err) {
 		http.Error(w, "读取上传目标失败", http.StatusInternalServerError)
 		return
@@ -173,8 +192,58 @@ func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHi
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintln(w, "上传成功")
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		http.Error(w, "读取上传文件失败", http.StatusInternalServerError)
+		return
+	}
+
+	writeUploadResponse(w, r, relPath, action, info)
+}
+
+func writeUploadResponse(w http.ResponseWriter, r *http.Request, relPath, action string, info os.FileInfo) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	resp := uploadResponse{
+		Status: http.StatusOK,
+		Action: action,
+		File: uploadResponseFile{
+			Name:    info.Name(),
+			Path:    relPath,
+			URL:     downloadURL(r, relPath),
+			Size:    info.Size(),
+			ModTime: info.ModTime().Format(time.RFC3339),
+		},
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("写入上传响应失败: %v", err)
+	}
+}
+
+func downloadURL(r *http.Request, relPath string) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+
+	u := *r.URL
+	u.Scheme = scheme
+	u.Host = host
+	u.Path = "/" + relPath
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 func authorized(header, token string) bool {
