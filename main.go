@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/subtle"
 	_ "embed"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -11,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	
+
 	godaemon "github.com/sevlyar/go-daemon"
 )
 
@@ -31,6 +33,11 @@ func main() {
 	absDir, err := filepath.Abs(*dir)
 	if err != nil {
 		log.Fatalf("获取目录绝对路径失败: %v", err)
+	}
+
+	uploadToken := os.Getenv("UFSHARE_TOKEN")
+	if err := validateUploadToken(uploadToken); err != nil {
+		log.Fatal(err)
 	}
 
 	// 守护进程模式
@@ -56,12 +63,12 @@ func main() {
 			return
 		}
 		defer cntxt.Release()
-		
+
 		log.Printf("守护进程已启动，PID: %d", os.Getpid())
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRequest(w, r, absDir, *hidden)
+		handleRequest(w, r, absDir, *hidden, uploadToken)
 	})
 
 	addr := fmt.Sprintf("%s:%s", *host, *port)
@@ -69,7 +76,14 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
-func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool) {
+func validateUploadToken(token string) error {
+	if token != "" && len(token) < 32 {
+		return fmt.Errorf("UFSHARE_TOKEN 长度必须至少为 32")
+	}
+	return nil
+}
+
+func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string) {
 	start := time.Now()
 	defer func() {
 		ip := getClientIP(r)
@@ -83,23 +97,25 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showH
 		)
 	}()
 
-	if r.Method != "GET" {
+	switch r.Method {
+	case http.MethodGet:
+		handleGet(w, r, baseDir, showHidden)
+	case http.MethodPut:
+		handleUpload(w, r, baseDir, showHidden, uploadToken)
+	default:
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
-		return
 	}
+}
 
+func handleGet(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool) {
 	path := filepath.Clean(r.URL.Path)
 	relPath := strings.TrimPrefix(path, "/")
 	fullPath := filepath.Join(baseDir, relPath)
 
 	// 隐藏文件保护：路径中任意分段以 . 开头时，未开启 -hidden 则返回 404
-	if !showHidden {
-		for seg := range strings.SplitSeq(relPath, "/") {
-			if strings.HasPrefix(seg, ".") {
-				http.NotFound(w, r)
-				return
-			}
-		}
+	if !showHidden && hasHiddenSegment(relPath) {
+		http.NotFound(w, r)
+		return
 	}
 
 	info, err := os.Stat(fullPath)
@@ -119,6 +135,107 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showH
 	}
 
 	serveFile(w, r, baseDir, relPath)
+}
+
+func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string) {
+	if uploadToken == "" {
+		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !authorized(r.Header.Get("Authorization"), uploadToken) {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(w, "未授权", http.StatusUnauthorized)
+		return
+	}
+
+	relPath, fullPath, err := uploadPath(baseDir, r.URL.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if !showHidden && hasHiddenSegment(relPath) {
+		http.NotFound(w, r)
+		return
+	}
+
+	if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
+		http.Error(w, "上传目标不能是目录", http.StatusBadRequest)
+		return
+	} else if err != nil && !os.IsNotExist(err) {
+		http.Error(w, "读取上传目标失败", http.StatusInternalServerError)
+		return
+	}
+
+	if err := saveUpload(fullPath, r.Body); err != nil {
+		http.Error(w, "保存上传文件失败", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	fmt.Fprintln(w, "上传成功")
+}
+
+func authorized(header, token string) bool {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	got := strings.TrimPrefix(header, prefix)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
+}
+
+func uploadPath(baseDir, requestPath string) (string, string, error) {
+	cleanPath := filepath.Clean(requestPath)
+	relPath := strings.TrimPrefix(cleanPath, "/")
+	if relPath == "" || relPath == "." {
+		return "", "", fmt.Errorf("上传路径不能为空")
+	}
+
+	fullPath := filepath.Join(baseDir, relPath)
+	relToBase, err := filepath.Rel(baseDir, fullPath)
+	if err != nil {
+		return "", "", fmt.Errorf("上传路径无效")
+	}
+	if relToBase == "." || strings.HasPrefix(relToBase, ".."+string(filepath.Separator)) || relToBase == ".." {
+		return "", "", fmt.Errorf("上传路径不能超出共享目录")
+	}
+
+	return relPath, fullPath, nil
+}
+
+func hasHiddenSegment(relPath string) bool {
+	for seg := range strings.SplitSeq(relPath, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+func saveUpload(fullPath string, body io.Reader) error {
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(dir, ".ufshare-upload-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := io.Copy(tmp, body); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpName, fullPath)
 }
 
 func getClientIP(r *http.Request) string {

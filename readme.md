@@ -25,6 +25,23 @@ docker pull <your-username>/ufshare:latest
 ./ufshare -hidden
 ```
 
+### Upload with curl
+
+Uploads are disabled by default. Set `UFSHARE_TOKEN` before starting the server
+to enable API-only uploads. The token must be at least 32 characters long.
+
+```bash
+export UFSHARE_TOKEN="12345678901234567890123456789012"
+./ufshare -dir /path/to/share
+
+curl -T ./local-file.txt \
+  -H "Authorization: Bearer ${UFSHARE_TOKEN}" \
+  --location "http://127.0.0.1:8000/uploaded-file.txt"
+```
+
+Uploading to a nested path creates missing parent directories. Uploading to an
+existing file replaces it.
+
 ### Daemon mode
 
 Run ufshare as a background daemon process:
@@ -62,6 +79,13 @@ docker run -d \
   -v $(pwd):/data \
   <your-username>/ufshare:latest \
   -hidden
+
+# Enable curl uploads
+docker run -d \
+  -p 8000:8000 \
+  -v $(pwd):/data \
+  -e UFSHARE_TOKEN="12345678901234567890123456789012" \
+  <your-username>/ufshare:latest
 ```
 
 ## Flags
