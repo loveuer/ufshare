@@ -175,3 +175,21 @@ func TestUploadPathRejectsEscape(t *testing.T) {
 		t.Fatal("relative traversal should be rejected")
 	}
 }
+
+func TestServeFavicon(t *testing.T) {
+	baseDir := t.TempDir()
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/favicon.svg", nil)
+	rec := httptest.NewRecorder()
+
+	handleRequest(rec, req, baseDir, false, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/svg+xml; charset=utf-8" {
+		t.Fatalf("content-type = %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), "<svg") {
+		t.Fatalf("favicon response is not svg: %q", rec.Body.String())
+	}
+}

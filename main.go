@@ -21,6 +21,9 @@ import (
 //go:embed templates/index.html
 var htmlTemplate string
 
+//go:embed templates/favicon.svg
+var faviconSVG string
+
 type uploadResponse struct {
 	Status int                `json:"status"`
 	Action string             `json:"action"`
@@ -114,12 +117,22 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showH
 
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Path == "/favicon.svg" {
+			serveFavicon(w)
+			return
+		}
 		handleGet(w, r, baseDir, showHidden)
 	case http.MethodPut:
 		handleUpload(w, r, baseDir, showHidden, uploadToken)
 	default:
 		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
 	}
+}
+
+func serveFavicon(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	fmt.Fprint(w, faviconSVG)
 }
 
 func handleGet(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool) {
