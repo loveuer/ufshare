@@ -7,7 +7,7 @@
 Download the latest binary from the [releases page](../../releases), or pull the Docker image:
 
 ```bash
-docker pull <your-username>/ufshare:latest
+docker pull loveuer/ufshare:latest
 ```
 
 ## Usage
@@ -29,9 +29,12 @@ docker pull <your-username>/ufshare:latest
 
 Uploads are disabled by default. Set `UFSHARE_TOKEN` before starting the server
 to enable API-only uploads. The token must be at least 32 characters long.
+Uploads are limited to 1 GB by default. Set `UFSHARE_MAX_UPLOAD_SIZE` to a byte
+size to override the limit.
 
 ```bash
 export UFSHARE_TOKEN="12345678901234567890123456789012"
+export UFSHARE_MAX_UPLOAD_SIZE="1073741824"
 ./ufshare -dir /path/to/share
 
 curl -T ./local-file.txt \
@@ -61,6 +64,15 @@ file. `file.url` can be used directly with `wget`.
 Uploading to a nested path creates missing parent directories. Uploading to an
 existing file replaces it.
 
+Upload API errors return JSON:
+
+```json
+{
+  "status": 401,
+  "error": "unauthorized"
+}
+```
+
 ### Daemon mode
 
 Run ufshare as a background daemon process:
@@ -83,20 +95,20 @@ kill $(cat ufshare.pid)
 docker run -d \
   -p 8000:8000 \
   -v $(pwd):/data \
-  <your-username>/ufshare:latest
+  loveuer/ufshare:latest
 
 # Serve a specific directory on a custom port
 docker run -d \
   -p 9000:9000 \
   -v /path/to/share:/data \
-  <your-username>/ufshare:latest \
+  loveuer/ufshare:latest \
   -host 0.0.0.0 -port 9000 -dir /data
 
 # Show hidden files
 docker run -d \
   -p 8000:8000 \
   -v $(pwd):/data \
-  <your-username>/ufshare:latest \
+  loveuer/ufshare:latest \
   -hidden
 
 # Enable curl uploads
@@ -104,8 +116,17 @@ docker run -d \
   -p 8000:8000 \
   -v $(pwd):/data \
   -e UFSHARE_TOKEN="12345678901234567890123456789012" \
-  <your-username>/ufshare:latest
+  -e UFSHARE_MAX_UPLOAD_SIZE="1073741824" \
+  loveuer/ufshare:latest
 ```
+
+## HTTP methods
+
+| Method | Description                                      |
+|--------|--------------------------------------------------|
+| `GET`  | Browse directories, download files, and preview  |
+| `HEAD` | Check file metadata without downloading the body |
+| `PUT`  | Upload files when `UFSHARE_TOKEN` is configured  |
 
 ## Flags
 

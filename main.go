@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,10 +25,17 @@ var htmlTemplate string
 //go:embed templates/favicon.svg
 var faviconSVG string
 
+const defaultMaxUploadSize = 1 << 30
+
 type uploadResponse struct {
 	Status int                `json:"status"`
 	Action string             `json:"action"`
 	File   uploadResponseFile `json:"file"`
+}
+
+type apiErrorResponse struct {
+	Status int    `json:"status"`
+	Error  string `json:"error"`
 }
 
 type uploadResponseFile struct {
@@ -55,6 +63,10 @@ func main() {
 
 	uploadToken := os.Getenv("UFSHARE_TOKEN")
 	if err := validateUploadToken(uploadToken); err != nil {
+		log.Fatal(err)
+	}
+	maxUploadSize, err := loadMaxUploadSize()
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -86,7 +98,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRequest(w, r, absDir, *hidden, uploadToken)
+		handleRequest(w, r, absDir, *hidden, uploadToken, maxUploadSize)
 	})
 
 	addr := fmt.Sprintf("%s:%s", *host, *port)
@@ -101,7 +113,20 @@ func validateUploadToken(token string) error {
 	return nil
 }
 
-func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string) {
+func loadMaxUploadSize() (int64, error) {
+	value := strings.TrimSpace(os.Getenv("UFSHARE_MAX_UPLOAD_SIZE"))
+	if value == "" {
+		return defaultMaxUploadSize, nil
+	}
+
+	size, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || size <= 0 {
+		return 0, fmt.Errorf("UFSHARE_MAX_UPLOAD_SIZE 必须是大于 0 的字节数")
+	}
+	return size, nil
+}
+
+func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string, maxUploadSize int64) {
 	start := time.Now()
 	defer func() {
 		ip := getClientIP(r)
@@ -122,10 +147,12 @@ func handleRequest(w http.ResponseWriter, r *http.Request, baseDir string, showH
 			return
 		}
 		handleGet(w, r, baseDir, showHidden)
+	case http.MethodHead:
+		handleGet(w, r, baseDir, showHidden)
 	case http.MethodPut:
-		handleUpload(w, r, baseDir, showHidden, uploadToken)
+		handleUpload(w, r, baseDir, showHidden, uploadToken, maxUploadSize)
 	default:
-		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
 }
 
@@ -165,49 +192,59 @@ func handleGet(w http.ResponseWriter, r *http.Request, baseDir string, showHidde
 	serveFile(w, r, baseDir, relPath)
 }
 
-func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string) {
+func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string, maxUploadSize int64) {
 	if uploadToken == "" {
-		http.Error(w, "方法不允许", http.StatusMethodNotAllowed)
+		writeAPIError(w, http.StatusMethodNotAllowed, "upload_disabled")
 		return
 	}
 
 	if !authorized(r.Header.Get("Authorization"), uploadToken) {
 		w.Header().Set("WWW-Authenticate", "Bearer")
-		http.Error(w, "未授权", http.StatusUnauthorized)
+		writeAPIError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if r.ContentLength > maxUploadSize {
+		writeAPIError(w, http.StatusRequestEntityTooLarge, "upload_too_large")
 		return
 	}
 
 	relPath, fullPath, err := uploadPath(baseDir, r.URL.Path)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeAPIError(w, http.StatusBadRequest, "invalid_upload_path")
 		return
 	}
 
 	if !showHidden && hasHiddenSegment(relPath) {
-		http.NotFound(w, r)
+		writeAPIError(w, http.StatusNotFound, "not_found")
 		return
 	}
 
 	action := "uploaded"
 	if info, err := os.Stat(fullPath); err == nil {
 		if info.IsDir() {
-			http.Error(w, "上传目标不能是目录", http.StatusBadRequest)
+			writeAPIError(w, http.StatusBadRequest, "target_is_directory")
 			return
 		}
 		action = "updated"
 	} else if err != nil && !os.IsNotExist(err) {
-		http.Error(w, "读取上传目标失败", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "stat_target_failed")
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 	if err := saveUpload(fullPath, r.Body); err != nil {
-		http.Error(w, "保存上传文件失败", http.StatusInternalServerError)
+		if strings.Contains(err.Error(), "http: request body too large") {
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "upload_too_large")
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "save_upload_failed")
 		return
 	}
 
 	info, err := os.Stat(fullPath)
 	if err != nil {
-		http.Error(w, "读取上传文件失败", http.StatusInternalServerError)
+		writeAPIError(w, http.StatusInternalServerError, "stat_upload_failed")
 		return
 	}
 
@@ -231,6 +268,19 @@ func writeUploadResponse(w http.ResponseWriter, r *http.Request, relPath, action
 	}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("写入上传响应失败: %v", err)
+	}
+}
+
+func writeAPIError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+
+	resp := apiErrorResponse{
+		Status: status,
+		Error:  code,
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("写入 API 错误响应失败: %v", err)
 	}
 }
 

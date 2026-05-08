@@ -30,6 +30,16 @@ func decodeUploadResponse(t *testing.T, rec *httptest.ResponseRecorder) uploadRe
 	return resp
 }
 
+func decodeAPIErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) apiErrorResponse {
+	t.Helper()
+
+	var resp apiErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode api error response: %v; body: %s", err, rec.Body.String())
+	}
+	return resp
+}
+
 func TestValidateUploadToken(t *testing.T) {
 	if err := validateUploadToken(""); err != nil {
 		t.Fatalf("empty token should disable upload without error: %v", err)
@@ -42,14 +52,43 @@ func TestValidateUploadToken(t *testing.T) {
 	}
 }
 
+func TestLoadMaxUploadSize(t *testing.T) {
+	t.Setenv("UFSHARE_MAX_UPLOAD_SIZE", "")
+	size, err := loadMaxUploadSize()
+	if err != nil {
+		t.Fatalf("default max upload size: %v", err)
+	}
+	if size != defaultMaxUploadSize {
+		t.Fatalf("default size = %d, want %d", size, defaultMaxUploadSize)
+	}
+
+	t.Setenv("UFSHARE_MAX_UPLOAD_SIZE", "42")
+	size, err = loadMaxUploadSize()
+	if err != nil {
+		t.Fatalf("custom max upload size: %v", err)
+	}
+	if size != 42 {
+		t.Fatalf("custom size = %d, want %d", size, 42)
+	}
+
+	t.Setenv("UFSHARE_MAX_UPLOAD_SIZE", "0")
+	if _, err := loadMaxUploadSize(); err == nil {
+		t.Fatal("zero max upload size should fail")
+	}
+}
+
 func TestUploadDisabled(t *testing.T) {
 	baseDir := t.TempDir()
 	rec := httptest.NewRecorder()
 
-	handleRequest(rec, putRequest("/file.txt", testToken, "content"), baseDir, false, "")
+	handleRequest(rec, putRequest("/file.txt", testToken, "content"), baseDir, false, "", defaultMaxUploadSize)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusMethodNotAllowed)
+	}
+	resp := decodeAPIErrorResponse(t, rec)
+	if resp.Status != http.StatusMethodNotAllowed || resp.Error != "upload_disabled" {
+		t.Fatalf("error response = %+v", resp)
 	}
 	if _, err := os.Stat(filepath.Join(baseDir, "file.txt")); !os.IsNotExist(err) {
 		t.Fatalf("disabled upload should not create file, stat err: %v", err)
@@ -66,10 +105,14 @@ func TestUploadUnauthorized(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 
-			handleRequest(rec, req, baseDir, false, testToken)
+			handleRequest(rec, req, baseDir, false, testToken, defaultMaxUploadSize)
 
 			if rec.Code != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+			}
+			resp := decodeAPIErrorResponse(t, rec)
+			if resp.Status != http.StatusUnauthorized || resp.Error != "unauthorized" {
+				t.Fatalf("error response = %+v", resp)
 			}
 		})
 	}
@@ -80,7 +123,7 @@ func TestUploadCreatesParentDirsAndOverwrites(t *testing.T) {
 	target := filepath.Join(baseDir, "a", "b", "file.txt")
 
 	rec := httptest.NewRecorder()
-	handleRequest(rec, putRequest("/a/b/file.txt", testToken, "first"), baseDir, false, testToken)
+	handleRequest(rec, putRequest("/a/b/file.txt", testToken, "first"), baseDir, false, testToken, defaultMaxUploadSize)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -100,7 +143,7 @@ func TestUploadCreatesParentDirsAndOverwrites(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	handleRequest(rec, putRequest("/a/b/file.txt", testToken, "second"), baseDir, false, testToken)
+	handleRequest(rec, putRequest("/a/b/file.txt", testToken, "second"), baseDir, false, testToken, defaultMaxUploadSize)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overwrite status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -127,10 +170,14 @@ func TestUploadRejectsDirectoryTarget(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	handleRequest(rec, putRequest("/dir", testToken, "content"), baseDir, false, testToken)
+	handleRequest(rec, putRequest("/dir", testToken, "content"), baseDir, false, testToken, defaultMaxUploadSize)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	resp := decodeAPIErrorResponse(t, rec)
+	if resp.Status != http.StatusBadRequest || resp.Error != "target_is_directory" {
+		t.Fatalf("error response = %+v", resp)
 	}
 }
 
@@ -138,15 +185,37 @@ func TestUploadHiddenPathRespectsHiddenFlag(t *testing.T) {
 	baseDir := t.TempDir()
 
 	rec := httptest.NewRecorder()
-	handleRequest(rec, putRequest("/.env", testToken, "secret"), baseDir, false, testToken)
+	handleRequest(rec, putRequest("/.env", testToken, "secret"), baseDir, false, testToken, defaultMaxUploadSize)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("hidden disabled status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
+	resp := decodeAPIErrorResponse(t, rec)
+	if resp.Status != http.StatusNotFound || resp.Error != "not_found" {
+		t.Fatalf("error response = %+v", resp)
+	}
 
 	rec = httptest.NewRecorder()
-	handleRequest(rec, putRequest("/.env", testToken, "secret"), baseDir, true, testToken)
+	handleRequest(rec, putRequest("/.env", testToken, "secret"), baseDir, true, testToken, defaultMaxUploadSize)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("hidden enabled status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestUploadRejectsTooLargeBody(t *testing.T) {
+	baseDir := t.TempDir()
+	rec := httptest.NewRecorder()
+
+	handleRequest(rec, putRequest("/file.txt", testToken, "too large"), baseDir, false, testToken, 3)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+	resp := decodeAPIErrorResponse(t, rec)
+	if resp.Status != http.StatusRequestEntityTooLarge || resp.Error != "upload_too_large" {
+		t.Fatalf("error response = %+v", resp)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "file.txt")); !os.IsNotExist(err) {
+		t.Fatalf("oversized upload should not create file, stat err: %v", err)
 	}
 }
 
@@ -157,7 +226,7 @@ func TestUploadResponseUsesForwardedURL(t *testing.T) {
 	req.Header.Set("X-Forwarded-Host", "files.example.test")
 	rec := httptest.NewRecorder()
 
-	handleRequest(rec, req, baseDir, false, testToken)
+	handleRequest(rec, req, baseDir, false, testToken, defaultMaxUploadSize)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -181,7 +250,7 @@ func TestServeFavicon(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/favicon.svg", nil)
 	rec := httptest.NewRecorder()
 
-	handleRequest(rec, req, baseDir, false, "")
+	handleRequest(rec, req, baseDir, false, "", defaultMaxUploadSize)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -191,5 +260,23 @@ func TestServeFavicon(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "<svg") {
 		t.Fatalf("favicon response is not svg: %q", rec.Body.String())
+	}
+}
+
+func TestHeadFile(t *testing.T) {
+	baseDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(baseDir, "file.txt"), []byte("content"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodHead, "http://example.com/file.txt", nil)
+	rec := httptest.NewRecorder()
+
+	handleRequest(rec, req, baseDir, false, "", defaultMaxUploadSize)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("HEAD response body length = %d, want 0", rec.Body.Len())
 	}
 }
