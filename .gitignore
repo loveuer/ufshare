@@ -3,7 +3,7 @@
 # Binary files
 ufshare
 ufshare.exe
-dist/
+/dist/
 
 # Build artifacts
 *.exe
@@ -36,6 +36,9 @@ vendor/
 .env
 .env.local
 .env.production
+
+# Frontend
+frontend/node_modules/
 
 # Temporary files
 tmp/

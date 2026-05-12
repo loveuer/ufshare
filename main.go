@@ -2,11 +2,12 @@ package main
 
 import (
 	"crypto/subtle"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -19,11 +20,11 @@ import (
 	godaemon "github.com/sevlyar/go-daemon"
 )
 
-//go:embed templates/index.html
-var htmlTemplate string
-
-//go:embed templates/favicon.svg
+//go:embed frontend/dist/favicon.svg
 var faviconSVG string
+
+//go:embed frontend/dist
+var spaFS embed.FS
 
 const defaultMaxUploadSize = 1 << 30
 
@@ -44,6 +45,18 @@ type uploadResponseFile struct {
 	URL     string `json:"url"`
 	Size    int64  `json:"size"`
 	ModTime string `json:"mod_time"`
+}
+
+type listEntry struct {
+	Name string `json:"name"`
+	Size string `json:"size,omitempty"`
+	Time string `json:"time"`
+}
+
+type listResponse struct {
+	Path  string      `json:"path"`
+	Dirs  []listEntry `json:"dirs"`
+	Files []listEntry `json:"files"`
 }
 
 func main() {
@@ -86,7 +99,6 @@ func main() {
 			log.Fatalf("无法启动守护进程: %v", err)
 		}
 		if d != nil {
-			// 父进程退出，打印子进程 PID
 			fmt.Printf("守护进程已启动，PID: %d\n", d.Pid)
 			fmt.Printf("PID 文件: %s\n", *pidFile)
 			fmt.Printf("日志文件: %s\n", *logFile)
@@ -97,6 +109,24 @@ func main() {
 		log.Printf("守护进程已启动，PID: %d", os.Getpid())
 	}
 
+	// SPA 静态资源
+	spaSub, err := fs.Sub(spaFS, "frontend/dist")
+	if err != nil {
+		log.Fatalf("读取 SPA 静态资源失败: %v", err)
+	}
+	http.Handle("/assets/", http.FileServer(http.FS(spaSub)))
+
+	// Favicon
+	http.HandleFunc("/favicon.svg", func(w http.ResponseWriter, _ *http.Request) {
+		serveFavicon(w)
+	})
+
+	// 目录列表 API
+	http.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
+		handleAPIList(w, r, absDir, *hidden)
+	})
+
+	// 兜底：文件服务 + SPA fallback
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handleRequest(w, r, absDir, *hidden, uploadToken, maxUploadSize)
 	})
@@ -167,7 +197,7 @@ func handleGet(w http.ResponseWriter, r *http.Request, baseDir string, showHidde
 	relPath := strings.TrimPrefix(path, "/")
 	fullPath := filepath.Join(baseDir, relPath)
 
-	// 隐藏文件保护：路径中任意分段以 . 开头时，未开启 -hidden 则返回 404
+	// 隐藏文件保护
 	if !showHidden && hasHiddenSegment(relPath) {
 		http.NotFound(w, r)
 		return
@@ -175,12 +205,14 @@ func handleGet(w http.ResponseWriter, r *http.Request, baseDir string, showHidde
 
 	info, err := os.Stat(fullPath)
 	if err != nil {
-		http.NotFound(w, r)
+		// 文件不存在 → 返回 SPA 让前端处理
+		serveSPA(w, r)
 		return
 	}
 
 	if info.IsDir() {
-		serveFileList(w, baseDir, relPath, showHidden)
+		// 目录 → 返回 SPA，前端会调用 /api/list 获取内容
+		serveSPA(w, r)
 		return
 	}
 
@@ -190,6 +222,72 @@ func handleGet(w http.ResponseWriter, r *http.Request, baseDir string, showHidde
 	}
 
 	serveFile(w, r, baseDir, relPath)
+}
+
+func handleAPIList(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = "/"
+	}
+
+	cleanPath := filepath.Clean(path)
+	relPath := strings.TrimPrefix(cleanPath, "/")
+	fullPath := filepath.Join(baseDir, relPath)
+
+	relToBase, err := filepath.Rel(baseDir, fullPath)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_path")
+		return
+	}
+	if strings.HasPrefix(relToBase, ".."+string(filepath.Separator)) || relToBase == ".." {
+		writeAPIError(w, http.StatusBadRequest, "invalid_path")
+		return
+	}
+
+	if !showHidden && hasHiddenSegment(relPath) {
+		writeAPIError(w, http.StatusNotFound, "not_found")
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if !info.IsDir() {
+		writeAPIError(w, http.StatusBadRequest, "not_a_directory")
+		return
+	}
+
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "read_dir_failed")
+		return
+	}
+
+	resp := listResponse{Path: path}
+	for _, entry := range entries {
+		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		inf, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		item := listEntry{
+			Name: entry.Name(),
+			Time: inf.ModTime().Format("2006-01-02 15:04"),
+		}
+		if entry.IsDir() {
+			resp.Dirs = append(resp.Dirs, item)
+		} else {
+			item.Size = formatSize(inf.Size())
+			resp.Files = append(resp.Files, item)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHidden bool, uploadToken string, maxUploadSize int64) {
@@ -249,6 +347,16 @@ func handleUpload(w http.ResponseWriter, r *http.Request, baseDir string, showHi
 	}
 
 	writeUploadResponse(w, r, relPath, action, info)
+}
+
+func serveSPA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	index, err := spaFS.ReadFile("frontend/dist/index.html")
+	if err != nil {
+		http.Error(w, "SPA not found", http.StatusInternalServerError)
+		return
+	}
+	w.Write(index)
 }
 
 func writeUploadResponse(w http.ResponseWriter, r *http.Request, relPath, action string, info os.FileInfo) {
@@ -391,70 +499,6 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
-func serveFileList(w http.ResponseWriter, baseDir, relPath string, showHidden bool) {
-	fullPath := filepath.Join(baseDir, relPath)
-	entries, err := os.ReadDir(fullPath)
-	if err != nil {
-		http.Error(w, "读取目录失败", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, htmlTemplate)
-
-	fmt.Fprint(w, `<script>
-const currentPath = "`+escapeJS(relPath)+`";
-const dirs = [`)
-	first := true
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if !first {
-			fmt.Fprint(w, ",")
-		}
-		first = false
-		name := entry.Name()
-		modTime := info.ModTime().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, `{"name":"%s","time":"%s"}`,
-			escapeJS(name), modTime)
-	}
-	fmt.Fprint(w, `];
-const files = [`)
-	first = true
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if !first {
-			fmt.Fprint(w, ",")
-		}
-		first = false
-		name := entry.Name()
-		size := formatSize(info.Size())
-		modTime := info.ModTime().Format("2006-01-02 15:04")
-		fmt.Fprintf(w, `{"name":"%s","size":"%s","time":"%s"}`,
-			escapeJS(name), size, modTime)
-	}
-	fmt.Fprint(w, `];
-renderFiles(dirs, files);
-</script>`)
-}
-
 func formatSize(size int64) string {
 	const unit = 1024
 	if size < unit {
@@ -466,14 +510,6 @@ func formatSize(size int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
-}
-
-func escapeJS(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	return s
 }
 
 func serveFile(w http.ResponseWriter, r *http.Request, baseDir, filename string) {
