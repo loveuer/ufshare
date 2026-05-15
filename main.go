@@ -265,7 +265,7 @@ func handleAPIList(w http.ResponseWriter, r *http.Request, baseDir string, showH
 		return
 	}
 
-	resp := listResponse{Path: path}
+	resp := listResponse{Path: path, Dirs: []listEntry{}, Files: []listEntry{}}
 	for _, entry := range entries {
 		if !showHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue

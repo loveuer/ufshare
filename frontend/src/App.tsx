@@ -45,7 +45,7 @@ function encodePath(parts: string[]): string {
 }
 
 export default function App() {
-  const path = decodeURIComponent(window.location.pathname).replace(/\/$/, "") || "";
+  const path = (() => { try { return decodeURIComponent(window.location.pathname); } catch { return window.location.pathname; } })().replace(/\/$/, "") || "";
   const [dirs, setDirs] = useState<DirEntry[]>([]);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [query, setQuery] = useState("");

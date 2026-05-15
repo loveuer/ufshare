@@ -280,3 +280,66 @@ func TestHeadFile(t *testing.T) {
 		t.Fatalf("HEAD response body length = %d, want 0", rec.Body.Len())
 	}
 }
+
+func TestAPIListEmptyDirReturnsArrays(t *testing.T) {
+	baseDir := t.TempDir()
+	req := httptest.NewRequest(http.MethodGet, "/api/list?path=/", nil)
+	rec := httptest.NewRecorder()
+
+	handleAPIList(rec, req, baseDir, false)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Dirs == nil {
+		t.Fatal("dirs must be [] not null for empty directory")
+	}
+	if resp.Files == nil {
+		t.Fatal("files must be [] not null for empty directory")
+	}
+}
+
+func TestAPIListChineseDirName(t *testing.T) {
+	baseDir := t.TempDir()
+	chineseDir := filepath.Join(baseDir, "中文目录")
+	if err := os.Mkdir(chineseDir, 0755); err != nil {
+		t.Fatalf("mkdir chinese: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chineseDir, "文件.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// list root — should see the Chinese dir
+	req := httptest.NewRequest(http.MethodGet, "/api/list?path=/", nil)
+	rec := httptest.NewRecorder()
+	handleAPIList(rec, req, baseDir, false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("root list status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var root listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &root); err != nil {
+		t.Fatalf("decode root: %v", err)
+	}
+	if len(root.Dirs) != 1 || root.Dirs[0].Name != "中文目录" {
+		t.Fatalf("expected [中文目录] dirs, got %+v", root.Dirs)
+	}
+
+	// list Chinese sub-dir — should see the file
+	req = httptest.NewRequest(http.MethodGet, "/api/list?path=/中文目录", nil)
+	rec = httptest.NewRecorder()
+	handleAPIList(rec, req, baseDir, false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subdir list status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var sub listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &sub); err != nil {
+		t.Fatalf("decode subdir: %v", err)
+	}
+	if len(sub.Files) != 1 || sub.Files[0].Name != "文件.txt" {
+		t.Fatalf("expected [文件.txt] files, got %+v", sub.Files)
+	}
+}
